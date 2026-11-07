@@ -1,0 +1,31 @@
+{
+  "name": "بیتا — حضور و بهره‌وری نیروها",
+  "short_name": "بیتا",
+  "description": "ثبت ورود و خروج، عملیات تولید و گزارش بهره‌وری",
+  "lang": "fa",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1c1760",
+  "theme_color": "#3b2fc9",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
