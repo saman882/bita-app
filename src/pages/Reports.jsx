@@ -39,11 +39,11 @@ const bucketLabel = (iso, mode) => {
   return mode === 'week' ? `هفتهٔ ${fa(jd)}/${fa(jm)}` : `${fa(jd)}/${fa(jm)}`
 }
 
-export default function Reports({ profile, isAdmin, workers = [] }) {
+export default function Reports({ workers = [] }) {
   const toast = useToast()
   const [preset, setPreset] = useState('month')
   const [[from, to], setRange] = useState(presetRange('month'))
-  const [who, setWho] = useState(isAdmin ? 'all' : profile.id)
+  const [who, setWho] = useState('all')
   const [mode, setMode] = useState('day')
   const [byStage, setByStage] = useState(false)
   const [data, setData] = useState(null)
@@ -55,7 +55,7 @@ export default function Reports({ profile, isAdmin, workers = [] }) {
     ;(async () => {
       let qo = supabase.from('v_operations').select('*').gte('work_date', from).lte('work_date', to).order('started_at')
       let qa = supabase.from('v_attendance').select('*').gte('work_date', from).lte('work_date', to)
-      if (who !== 'all') { qo = qo.eq('user_id', who); qa = qa.eq('user_id', who) }
+      if (who !== 'all') { qo = qo.eq('worker_id', who); qa = qa.eq('worker_id', who) }
       const [o, a] = await Promise.all([qo.limit(20000), qa.limit(20000)])
       if (!alive) return
       if (o.error || a.error) { toast(errText(o.error || a.error), 'bad'); setData({ ops: [], att: [] }); return }
@@ -85,7 +85,7 @@ export default function Reports({ profile, isAdmin, workers = [] }) {
     const rows = [['تاریخ', 'نیرو', 'مرحله', 'شروع', 'پایان', 'تعداد', 'واحد', 'زمان واقعی (ثانیه)', 'زمان استاندارد (ثانیه)', 'بهره‌وری ٪', 'توضیح']]
     for (const o of data.ops.filter((x) => x.ended_at)) {
       const e = efficiency(Number(o.actual_seconds), Number(o.standard_total_seconds))
-      rows.push([jDateEn(o.work_date), nameOf[o.user_id] || profile.full_name, o.stage_name,
+      rows.push([jDateEn(o.work_date), nameOf[o.worker_id] || '—', o.stage_name,
         new Date(o.started_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Tehran' }),
         new Date(o.ended_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Tehran' }),
         o.quantity, o.unit, Math.round(o.actual_seconds), Math.round(o.standard_total_seconds), e == null ? '' : (e * 100).toFixed(1), o.note || ''])
@@ -93,13 +93,13 @@ export default function Reports({ profile, isAdmin, workers = [] }) {
     rows.push([])
     rows.push(['تاریخ', 'نیرو', 'ورود', 'خروج', 'ورود مقرر', 'خروج مقرر', 'اختلاف ورود (ثانیه، مثبت=تأخیر)', 'اختلاف خروج (ثانیه، منفی=تعجیل)', 'حضور (ثانیه)'])
     for (const a of data.att) {
-      rows.push([jDateEn(a.work_date), nameOf[a.user_id] || profile.full_name,
+      rows.push([jDateEn(a.work_date), nameOf[a.worker_id] || '—',
         new Date(a.clock_in).toLocaleTimeString('en-GB', { timeZone: 'Asia/Tehran' }),
         a.clock_out ? new Date(a.clock_out).toLocaleTimeString('en-GB', { timeZone: 'Asia/Tehran' }) : '',
         a.expected_in, a.expected_out, Math.round(a.in_diff_seconds), a.out_diff_seconds == null ? '' : Math.round(a.out_diff_seconds),
         a.presence_seconds == null ? '' : Math.round(a.presence_seconds)])
     }
-    const label = who === 'all' ? 'all' : (workers.find((w) => w.id === who)?.username || profile.username)
+    const label = who === 'all' ? 'all' : (workers.find((w) => w.id === who)?.personnel_code || who.slice(0, 8))
     downloadCsv(`report-${label}-${from}_${to}.csv`, rows)
   }
 
@@ -115,7 +115,7 @@ export default function Reports({ profile, isAdmin, workers = [] }) {
 
       {/* ---------- FILTERS ---------- */}
       <div className="card filters">
-        {isAdmin && (
+        {(
           <select className="input" value={who} onChange={(e) => setWho(e.target.value)} aria-label="نیرو">
             <option value="all">همهٔ نیروها</option>
             {workers.map((w) => <option key={w.id} value={w.id}>{w.full_name}</option>)}
@@ -223,7 +223,7 @@ export default function Reports({ profile, isAdmin, workers = [] }) {
           </section>
 
           {/* ---------- PER WORKER (admin, all) ---------- */}
-          {isAdmin && who === 'all' && (
+          {who === 'all' && (
             <section className="card">
               <div className="card-head"><h2>مقایسهٔ نیروها</h2></div>
               <div className="table-wrap">
@@ -277,7 +277,7 @@ export default function Reports({ profile, isAdmin, workers = [] }) {
                           const ol = outDiffLabel(a.out_diff_seconds == null ? null : Number(a.out_diff_seconds))
                           return (
                             <div key={a.id} className="att-line">
-                              {who === 'all' && <b>{nameOf[a.user_id]}</b>}
+                              {who === 'all' && <b>{nameOf[a.worker_id]}</b>}
                               <span>ورود {clock(a.clock_in)} <em className={`tone-${il.tone}`}>{il.text}</em></span>
                               <span>خروج {a.clock_out ? clock(a.clock_out) : 'ثبت نشده'} {a.clock_out && <em className={`tone-${ol.tone}`}>{ol.text}</em>}</span>
                               <span>حضور {a.presence_seconds == null ? '—' : humanDur(Number(a.presence_seconds))}</span>
@@ -292,7 +292,7 @@ export default function Reports({ profile, isAdmin, workers = [] }) {
                                 const e = efficiency(Number(o.actual_seconds), Number(o.standard_total_seconds))
                                 return (
                                   <tr key={o.id}>
-                                    {who === 'all' && <td>{nameOf[o.user_id]}</td>}
+                                    {who === 'all' && <td>{nameOf[o.worker_id]}</td>}
                                     <td><span className="dot" style={{ background: o.color }} />{o.stage_name}{o.note && <small className="muted note"> — {o.note}</small>}</td>
                                     <td className="mono">{clock(o.started_at)}</td>
                                     <td className="mono">{clock(o.ended_at)}</td>

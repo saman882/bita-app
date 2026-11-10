@@ -28,7 +28,7 @@ export function analyze(ops, att) {
   const done = ops.filter((o) => o.ended_at)
   // presence per user+day, only for closed attendance
   const presKey = new Map()
-  for (const a of att) if (a.presence_seconds != null) presKey.set(`${a.user_id}|${a.work_date}`, Number(a.presence_seconds))
+  for (const a of att) if (a.presence_seconds != null) presKey.set(`${a.worker_id}|${a.work_date}`, Number(a.presence_seconds))
 
   const total = blank()
   const byStage = new Map()
@@ -44,12 +44,12 @@ export function analyze(ops, att) {
     const A = Number(o.actual_seconds)
     const S = Number(o.standard_total_seconds)
     const Q = Number(o.quantity)
-    const closed = presKey.has(`${o.user_id}|${o.work_date}`)
+    const closed = presKey.has(`${o.worker_id}|${o.work_date}`)
     const groups = [
       total,
       touch(byStage, o.stage_id, { name: o.stage_name, unit: o.unit, color: o.color }),
       touch(byDay, o.work_date, { date: o.work_date }),
-      touch(byUser, o.user_id, { user_id: o.user_id }),
+      touch(byUser, o.worker_id, { worker_id: o.worker_id }),
     ]
     for (const g of groups) {
       g.qty += Q
@@ -62,7 +62,7 @@ export function analyze(ops, att) {
   }
 
   for (const a of att) {
-    const groups = [total, touch(byDay, a.work_date, { date: a.work_date }), touch(byUser, a.user_id, { user_id: a.user_id })]
+    const groups = [total, touch(byDay, a.work_date, { date: a.work_date }), touch(byUser, a.worker_id, { worker_id: a.worker_id })]
     for (const g of groups) {
       g.days.add(a.work_date)
       if (a.presence_seconds != null) g.presence += Number(a.presence_seconds)
@@ -88,14 +88,14 @@ export function trend(ops, att, mode, stageIds) {
     if (!buckets.has(k)) buckets.set(k, { key: k, actual: 0, standard: 0, presence: 0, effOps: 0, perStage: {} })
     return buckets.get(k)
   }
-  const presKey = new Set(att.filter((a) => a.presence_seconds != null).map((a) => `${a.user_id}|${a.work_date}`))
+  const presKey = new Set(att.filter((a) => a.presence_seconds != null).map((a) => `${a.worker_id}|${a.work_date}`))
   for (const o of ops) {
     if (!o.ended_at) continue
     const b = pick(keyOf(o.work_date))
     const A = Number(o.actual_seconds), S = Number(o.standard_total_seconds)
     b.actual += A
     b.standard += S
-    if (presKey.has(`${o.user_id}|${o.work_date}`)) b.effOps += A
+    if (presKey.has(`${o.worker_id}|${o.work_date}`)) b.effOps += A
     if (stageIds) {
       const ps = (b.perStage[o.stage_id] ||= { actual: 0, standard: 0 })
       ps.actual += A

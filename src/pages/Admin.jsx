@@ -1,247 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { supabase, errText, adminUsers } from '../lib/supabase'
-import { useNow } from '../lib/clock'
+import { supabase, errText } from '../lib/supabase'
 import { efficiency } from '../lib/calc'
 import {
-  fa, num, pct, clock, hms, humanDur, jDateLong, tehranIso, shortTime, inDiffLabel, toEn, normalizeFa, secToMmss, tehranMs,
+  num, pct, clock, humanDur, jDateLong, tehranIso, inDiffLabel, normalizeFa, secToMmss, tehranMs,
 } from '../lib/fmt'
-import { Icon, Button, Sheet, Field, Empty, Spinner, Kpi, NumInput, JDateInput, useToast, effTone } from '../components/ui'
-
-/* =====================================================================
-   LIVE DASHBOARD
-   ===================================================================== */
-export function Live({ workers }) {
-  const toast = useToast()
-  const now = useNow()
-  const today = tehranIso(now)
-  const [data, setData] = useState(null)
-
-  const load = useCallback(async () => {
-    const [a, o] = await Promise.all([
-      supabase.from('v_attendance').select('*').eq('work_date', today),
-      supabase.from('v_operations').select('*').or(`work_date.eq.${today},ended_at.is.null`),
-    ])
-    if (a.error || o.error) toast(errText(a.error || o.error), 'bad')
-    setData({ att: a.data || [], ops: o.data || [] })
-  }, [today, toast])
-
-  useEffect(() => {
-    load()
-    const id = setInterval(load, 30000)
-    return () => clearInterval(id)
-  }, [load])
-
-  const active = workers.filter((w) => w.active && w.role === 'worker')
-  if (!data) return <div className="page-center"><Spinner size={28} /></div>
-
-  const rows = active.map((w) => {
-    const a = data.att.find((x) => x.user_id === w.id)
-    const mine = data.ops.filter((o) => o.user_id === w.id)
-    const open = mine.find((o) => !o.ended_at)
-    const done = mine.filter((o) => o.ended_at && o.work_date === today)
-    let A = 0, S = 0, Q = 0
-    for (const o of done) { A += +o.actual_seconds; S += +o.standard_total_seconds; Q += +o.quantity }
-    const status = !a ? 'absent' : a.clock_out ? 'left' : open ? 'working' : 'idle'
-    return { w, a, open, eff: efficiency(A, S), Q, n: done.length, status }
-  })
-  const count = (s) => rows.filter((r) => r.status === s).length
-  const late = rows.filter((r) => r.a && Number(r.a.in_diff_seconds) > 0).length
-  const order = { working: 0, idle: 1, left: 2, absent: 3 }
-  const labels = { working: 'در حال کار', idle: 'حاضر، بدون عملیات', left: 'خارج شده', absent: 'هنوز نیامده' }
-
-  return (
-    <div className="page">
-      <div className="page-title">
-        <h1>وضعیت زنده</h1>
-        <span className="muted small">{jDateLong(today)} · <span className="mono">{clock(now)}</span></span>
-      </div>
-      <div className="kpis">
-        <Kpi icon="bolt" label="در حال کار" value={fa(count('working'))} tone="good" />
-        <Kpi icon="users" label="حاضر" value={fa(rows.length - count('absent'))} sub={`از ${fa(rows.length)} نفر`} />
-        <Kpi icon="alert" label="با تأخیر" value={fa(late)} tone={late ? 'bad' : ''} />
-        <Kpi icon="clock" label="غایب تا الان" value={fa(count('absent'))} tone={count('absent') ? 'warn' : ''} />
-      </div>
-      {rows.length === 0 ? (
-        <Empty icon="users" title="هنوز نیرویی تعریف نشده" text="از بخش «نیروها» نیروی جدید اضافه کنید." />
-      ) : (
-        <div className="live-grid">
-          {[...rows].sort((x, y) => order[x.status] - order[y.status]).map((r) => {
-            const il = r.a ? inDiffLabel(Number(r.a.in_diff_seconds)) : null
-            return (
-              <div key={r.w.id} className={`live-card st-${r.status}`} style={r.open ? { '--c': r.open.color } : undefined}>
-                <div className="live-head">
-                  <div className="avatar">{r.w.full_name.trim()[0]}</div>
-                  <div className="grow">
-                    <b>{r.w.full_name}</b>
-                    <small className="muted"><span className="st-dot" />{labels[r.status]}</small>
-                  </div>
-                  {r.n > 0 && <span className={`badge badge-${effTone(r.eff)}`}>{pct(r.eff)}</span>}
-                </div>
-                {r.open && (
-                  <div className="live-op">
-                    <span className="op-dot pulse" />
-                    <span>{r.open.stage_name}</span>
-                    <b className="mono">{hms((now - Date.parse(r.open.started_at)) / 1000)}</b>
-                  </div>
-                )}
-                <div className="live-foot">
-                  {r.a ? (
-                    <>
-                      <span>ورود {clock(r.a.clock_in)}</span>
-                      <em className={`tone-${il.tone}`}>{il.text}</em>
-                    </>
-                  ) : (
-                    <span className="muted">شیفت از {shortTime(r.w.shift_start)}</span>
-                  )}
-                  {r.n > 0 && <span className="muted">· {num(r.Q)} تولید</span>}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* =====================================================================
-   WORKERS
-   ===================================================================== */
-const emptyWorker = { full_name: '', username: '', password: '', personnel_code: '', shift_start: '08:00', shift_end: '16:00', role: 'worker', active: true }
-
-export function Workers({ workers, reload, me }) {
-  const toast = useToast()
-  const [edit, setEdit] = useState(null) // object or null
-  const [pw, setPw] = useState(null) // worker for password
-  const [del, setDel] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [newPw, setNewPw] = useState('')
-  const isNew = edit && !edit.id
-
-  const save = async () => {
-    const f = { ...edit, full_name: normalizeFa(edit.full_name).trim(), personnel_code: toEn(edit.personnel_code || '').trim() || null }
-    if (!f.full_name) return toast('نام کامل را وارد کنید', 'bad')
-    setBusy(true)
-    try {
-      if (isNew) {
-        await adminUsers({ action: 'create', ...f, username: toEn(f.username).trim().toLowerCase() })
-        toast(`«${f.full_name}» اضافه شد`)
-      } else {
-        const { error } = await supabase.from('profiles').update({
-          full_name: f.full_name, personnel_code: f.personnel_code, shift_start: f.shift_start, shift_end: f.shift_end,
-          role: f.id === me.id ? 'admin' : f.role, active: f.id === me.id ? true : f.active,
-        }).eq('id', f.id)
-        if (error) throw error
-        toast('تغییرات ذخیره شد')
-      }
-      setEdit(null)
-      reload()
-    } catch (e) { toast(errText(e), 'bad') } finally { setBusy(false) }
-  }
-
-  const list = [...workers].sort((a, b) => (a.active === b.active ? a.full_name.localeCompare(b.full_name, 'fa') : a.active ? -1 : 1))
-
-  return (
-    <div className="page">
-      <div className="page-title">
-        <h1>نیروها</h1>
-        <Button icon="plus" onClick={() => setEdit({ ...emptyWorker })}>نیروی جدید</Button>
-      </div>
-      <div className="list">
-        {list.map((w) => (
-          <div key={w.id} className={`list-item ${w.active ? '' : 'is-off'}`}>
-            <div className="avatar">{w.full_name.trim()[0]}</div>
-            <div className="grow">
-              <b>{w.full_name} {w.role === 'admin' && <span className="badge badge-brand">مدیر</span>} {!w.active && <span className="badge badge-soft">غیرفعال</span>}</b>
-              <small className="muted">
-                <span dir="ltr">{w.username}</span>
-                {w.personnel_code && <> · کد {fa(w.personnel_code)}</>} · شیفت {shortTime(w.shift_start)}–{shortTime(w.shift_end)}
-              </small>
-            </div>
-            <button className="icon-btn" aria-label="تغییر رمز" title="تغییر رمز" onClick={() => { setNewPw(''); setPw(w) }}><Icon name="key" size={18} /></button>
-            <button className="icon-btn" aria-label="ویرایش" title="ویرایش" onClick={() => setEdit({ ...w, shift_start: w.shift_start.slice(0, 5), shift_end: w.shift_end.slice(0, 5) })}><Icon name="edit" size={18} /></button>
-          </div>
-        ))}
-      </div>
-
-      <Sheet open={!!edit} onClose={() => setEdit(null)} title={isNew ? 'نیروی جدید' : 'ویرایش نیرو'}
-        footer={
-          <div className="row-gap">
-            {!isNew && edit?.id !== me.id && (
-              <Button variant="ghost-danger" icon="trash" onClick={() => { setDel(edit); setEdit(null) }}>حذف</Button>
-            )}
-            <Button className="grow" icon="check" loading={busy} onClick={save}>{isNew ? 'ساخت حساب' : 'ذخیره'}</Button>
-          </div>
-        }>
-        {edit && (
-          <div className="form">
-            <Field label="نام و نام خانوادگی"><input className="input" value={edit.full_name} onChange={(e) => setEdit({ ...edit, full_name: e.target.value })} placeholder="مثلاً علی رضایی" /></Field>
-            {isNew && (
-              <div className="grid2">
-                <Field label="نام کاربری" hint="حروف انگلیسی کوچک و عدد">
-                  <input className="input" dir="ltr" autoCapitalize="none" autoComplete="off" value={edit.username} onChange={(e) => setEdit({ ...edit, username: e.target.value })} placeholder="ali.rezaei" />
-                </Field>
-                <Field label="رمز عبور" hint="حداقل ۶ کاراکتر">
-                  <input className="input" dir="ltr" autoComplete="new-password" value={edit.password} onChange={(e) => setEdit({ ...edit, password: e.target.value })} />
-                </Field>
-              </div>
-            )}
-            <Field label="کد پرسنلی (اختیاری)"><NumInput value={edit.personnel_code || ''} onChange={(v) => setEdit({ ...edit, personnel_code: v })} /></Field>
-            <div className="grid2">
-              <Field label="ساعت ورود مقرر"><input type="time" className="input" dir="ltr" value={edit.shift_start} onChange={(e) => setEdit({ ...edit, shift_start: e.target.value })} /></Field>
-              <Field label="ساعت خروج مقرر"><input type="time" className="input" dir="ltr" value={edit.shift_end} onChange={(e) => setEdit({ ...edit, shift_end: e.target.value })} /></Field>
-            </div>
-            {edit.id !== me.id && (
-              <div className="grid2">
-                <Field label="نقش">
-                  <select className="input" value={edit.role} onChange={(e) => setEdit({ ...edit, role: e.target.value })}>
-                    <option value="worker">نیرو</option>
-                    <option value="admin">مدیر</option>
-                  </select>
-                </Field>
-                {!isNew && (
-                  <Field label="وضعیت">
-                    <select className="input" value={edit.active ? '1' : '0'} onChange={(e) => setEdit({ ...edit, active: e.target.value === '1' })}>
-                      <option value="1">فعال</option>
-                      <option value="0">غیرفعال (نمی‌تواند ثبت کند)</option>
-                    </select>
-                  </Field>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </Sheet>
-
-      <Sheet open={!!pw} onClose={() => setPw(null)} title={`رمز جدید برای ${pw?.full_name ?? ''}`}
-        footer={<Button className="btn-block" icon="key" loading={busy} onClick={async () => {
-          setBusy(true)
-          try { await adminUsers({ action: 'set_password', id: pw.id, password: toEn(newPw) }); toast('رمز عبور تغییر کرد'); setPw(null) }
-          catch (e) { toast(errText(e), 'bad') } finally { setBusy(false) }
-        }}>ثبت رمز جدید</Button>}>
-        <Field label="رمز عبور جدید" hint="حداقل ۶ کاراکتر؛ آن را به نیرو اعلام کنید">
-          <input className="input" dir="ltr" value={newPw} onChange={(e) => setNewPw(e.target.value)} autoComplete="new-password" />
-        </Field>
-      </Sheet>
-
-      <Sheet open={!!del} onClose={() => setDel(null)} title="حذف نیرو"
-        footer={<div className="row-gap">
-          <Button variant="ghost" onClick={() => setDel(null)}>انصراف</Button>
-          <Button variant="danger" className="grow" icon="trash" loading={busy} onClick={async () => {
-            setBusy(true)
-            try { await adminUsers({ action: 'delete', id: del.id }); toast('حذف شد'); setDel(null); reload() }
-            catch (e) { toast(errText(e), 'bad') } finally { setBusy(false) }
-          }}>حذف همیشگی</Button>
-        </div>}>
-        <div className="banner banner-bad">
-          <Icon name="alert" />
-          <div>با حذف «{del?.full_name}» <b>همهٔ سوابق حضور و عملیات او هم پاک می‌شود</b>.
-            <small>اگر فقط نمی‌خواهید دیگر ثبت کند، به‌جای حذف او را «غیرفعال» کنید.</small></div>
-        </div>
-      </Sheet>
-    </div>
-  )
-}
+import { Icon, Button, Sheet, Field, Empty, Spinner, NumInput, JDateInput, useToast, effTone } from '../components/ui'
 
 /* =====================================================================
    STAGES
@@ -364,7 +127,7 @@ const tsOf = (iso, t) => (t ? new Date(tehranMs(iso, t.length === 5 ? t + ':00' 
 export function Records({ workers, me }) {
   const toast = useToast()
   const [picked, setWho] = useState(null)
-  const who = picked || workers.find((w) => w.role === 'worker' && w.active)?.id || workers[0]?.id
+  const who = picked || workers.find((w) => w.active)?.id || workers[0]?.id
   const [date, setDate] = useState(tehranIso())
   const [att, setAtt] = useState(undefined)
   const [ops, setOps] = useState([])
@@ -378,8 +141,8 @@ export function Records({ workers, me }) {
     if (!who) return
     setAtt(undefined)
     const [a, o, s] = await Promise.all([
-      supabase.from('v_attendance').select('*').eq('user_id', who).eq('work_date', date).maybeSingle(),
-      supabase.from('v_operations').select('*').eq('user_id', who).eq('work_date', date).order('started_at'),
+      supabase.from('v_attendance').select('*').eq('worker_id', who).eq('work_date', date).maybeSingle(),
+      supabase.from('v_operations').select('*').eq('worker_id', who).eq('work_date', date).order('started_at'),
       supabase.from('stages').select('*').order('sort_order'),
     ])
     if (a.error || o.error) toast(errText(a.error || o.error), 'bad')
@@ -390,6 +153,7 @@ export function Records({ workers, me }) {
   useEffect(() => { load() }, [load])
 
   const stamp = { edited_by: me.id, edited_at: new Date().toISOString() }
+  const recStamp = { recorded_by: me.id }
 
   const saveAtt = async () => {
     const clock_in = tsOf(date, attEdit.in)
@@ -400,7 +164,7 @@ export function Records({ workers, me }) {
     setBusy(true)
     const { error } = att
       ? await supabase.from('attendance').update(row).eq('id', att.id)
-      : await supabase.from('attendance').insert({ ...row, user_id: who, work_date: date })
+      : await supabase.from('attendance').insert({ ...row, ...recStamp, worker_id: who, work_date: date })
     setBusy(false)
     if (error) return toast(errText(error), 'bad')
     toast('حضور ذخیره شد'); setAttEdit(null); load()
@@ -427,7 +191,7 @@ export function Records({ workers, me }) {
     setBusy(true)
     const { error } = edit.id
       ? await supabase.from('operations').update(row).eq('id', edit.id)
-      : await supabase.from('operations').insert({ ...row, user_id: who, work_date: date })
+      : await supabase.from('operations').insert({ ...row, ...recStamp, worker_id: who, work_date: date })
     setBusy(false)
     if (error) return toast(/one_open/.test(error.message) ? 'این نیرو یک عملیات باز دیگر دارد' : errText(error), 'bad')
     toast('عملیات ذخیره شد'); setEdit(null); load()

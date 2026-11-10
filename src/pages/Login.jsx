@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { supabase, usernameToEmail, errText } from '../lib/supabase'
-import { toEn } from '../lib/fmt'
+import { supabase, usernameToEmail, errText, normPw } from '../lib/supabase'
 import { Icon, Spinner } from '../components/ui'
 
 export default function Login() {
@@ -15,7 +14,7 @@ export default function Login() {
     setErr('')
     if (!u.trim() || !p) return setErr('نام کاربری و رمز عبور را وارد کنید')
     setBusy(true)
-    const { error } = await supabase.auth.signInWithPassword({ email: usernameToEmail(toEn(u)), password: toEn(p) })
+    const { error } = await supabase.auth.signInWithPassword({ email: usernameToEmail(u), password: normPw(p) })
     setBusy(false)
     if (error) setErr(errText(error))
   }
@@ -28,7 +27,7 @@ export default function Login() {
       <form className="login-card" onSubmit={submit}>
         <div className="logo"><Icon name="clock" size={30} stroke={2.2} /></div>
         <h1>بیتا</h1>
-        <p className="muted">سامانهٔ حضور، تولید و بهره‌وری نیروها</p>
+        <p className="muted">ورود مدیر و سرپرست</p>
 
         <label className="field">
           <span className="field-label">نام کاربری</span>

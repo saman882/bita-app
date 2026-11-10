@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { supabase, errText } from '../lib/supabase'
-import { fa, shortTime, toEn } from '../lib/fmt'
-import { Button, Field, useToast, Icon } from '../components/ui'
+import { supabase, errText, normPw } from '../lib/supabase'
+import { Button, Field, useToast } from '../components/ui'
 
 export default function Account({ profile }) {
   const toast = useToast()
@@ -10,10 +9,11 @@ export default function Account({ profile }) {
   const [busy, setBusy] = useState(false)
 
   const change = async () => {
-    if (p1.length < 6) return toast('رمز باید حداقل ۶ کاراکتر باشد', 'bad')
-    if (p1 !== p2) return toast('تکرار رمز یکسان نیست', 'bad')
+    const a = normPw(p1), b = normPw(p2)
+    if (a.length < 6) return toast('رمز باید حداقل ۶ کاراکتر باشد', 'bad')
+    if (a !== b) return toast('تکرار رمز یکسان نیست', 'bad')
     setBusy(true)
-    const { error } = await supabase.auth.updateUser({ password: toEn(p1) })
+    const { error } = await supabase.auth.updateUser({ password: a })
     setBusy(false)
     if (error) return toast(errText(error), 'bad')
     setP1(''); setP2('')
@@ -26,15 +26,14 @@ export default function Account({ profile }) {
         <div className="avatar xl">{profile.full_name.trim()[0]}</div>
         <div>
           <h1>{profile.full_name}</h1>
-          <p className="muted"><span dir="ltr">{profile.username}</span>{profile.personnel_code && <> · کد پرسنلی {fa(profile.personnel_code)}</>}</p>
-          <p className="muted small"><Icon name="clock" size={14} /> شیفت {shortTime(profile.shift_start)} تا {shortTime(profile.shift_end)}</p>
+          <p className="muted"><span dir="ltr">{profile.username}</span> · {profile.role === 'admin' ? 'مدیر' : 'سرپرست'}</p>
         </div>
       </div>
 
       <section className="card">
         <div className="card-head"><h2>تغییر رمز عبور</h2></div>
         <div className="form">
-          <Field label="رمز جدید"><input className="input" dir="ltr" type="password" autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} /></Field>
+          <Field label="رمز جدید" hint="به حروف بزرگ و کوچک حساس نیست"><input className="input" dir="ltr" type="password" autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} /></Field>
           <Field label="تکرار رمز جدید"><input className="input" dir="ltr" type="password" autoComplete="new-password" value={p2} onChange={(e) => setP2(e.target.value)} /></Field>
           <Button icon="key" loading={busy} onClick={change}>ذخیرهٔ رمز</Button>
         </div>

@@ -3,26 +3,28 @@ import { supabase, errText } from './lib/supabase'
 import { syncServerClock } from './lib/clock'
 import { Icon, Spinner, ToastProvider, Button } from './components/ui'
 import Login from './pages/Login'
-import Today from './pages/Today'
 import Account from './pages/Account'
-import { Live, Workers, Stages, Records } from './pages/Admin'
+import Board from './pages/Board'
+import { Workers, Users } from './pages/People'
+import { Stages, Records } from './pages/Admin'
 
 const Reports = lazy(() => import('./pages/Reports'))
 
-const WORKER_TABS = [
-  { id: 'today', label: 'امروز', icon: 'home' },
-  { id: 'reports', label: 'گزارش من', icon: 'chart' },
+const SUPERVISOR_TABS = [
+  { id: 'board', label: 'ثبت', icon: 'clock' },
+  { id: 'workers', label: 'نیروها', icon: 'users' },
   { id: 'account', label: 'حساب', icon: 'user' },
 ]
 const ADMIN_TABS = [
-  { id: 'live', label: 'زنده', icon: 'live' },
+  { id: 'board', label: 'ثبت و وضعیت', short: 'ثبت', icon: 'live' },
   { id: 'reports', label: 'گزارش‌ها', icon: 'chart' },
   { id: 'workers', label: 'نیروها', icon: 'users' },
-  { id: 'stages', label: 'مراحل', icon: 'layers' },
-  { id: 'records', label: 'اصلاح', icon: 'edit' },
-  { id: 'today', label: 'ثبت من', icon: 'clock' },
+  { id: 'stages', label: 'مراحل و استاندارد', short: 'مراحل', icon: 'layers' },
+  { id: 'records', label: 'اصلاح ثبت‌ها', short: 'اصلاح', icon: 'edit' },
+  { id: 'users', label: 'کاربران', icon: 'key' },
   { id: 'account', label: 'حساب', icon: 'user' },
 ]
+const MOBILE_HIDDEN = new Set(['account', 'users']) // reachable from the avatar menu on mobile
 
 export default function App() {
   return (
@@ -48,8 +50,9 @@ function Root() {
     if (!uid) { setProfile(null); return }
     setProfileErr('')
     syncServerClock()
-    supabase.from('profiles').select('*').eq('id', uid).single().then(({ data, error }) => {
+    supabase.from('profiles').select('*').eq('id', uid).maybeSingle().then(({ data, error }) => {
       if (error) setProfileErr(errText(error))
+      else if (!data) setProfileErr('این حساب دیگر دسترسی ندارد. با مدیر تماس بگیرید.')
       else if (!data.active) setProfileErr('حساب شما غیرفعال شده است. با مدیر تماس بگیرید.')
       else setProfile(data)
     })
@@ -73,28 +76,30 @@ const Splash = () => (
 
 function Shell({ profile }) {
   const isAdmin = profile.role === 'admin'
-  const tabs = isAdmin ? ADMIN_TABS : WORKER_TABS
+  const tabs = isAdmin ? ADMIN_TABS : SUPERVISOR_TABS
   const [tab, setTab] = useState(() => {
     const h = location.hash.slice(1)
     return tabs.some((t) => t.id === h) ? h : tabs[0].id
   })
   const [workers, setWorkers] = useState([])
+  const [menu, setMenu] = useState(false)
 
   const loadWorkers = useCallback(async () => {
-    if (!isAdmin) return
-    const { data } = await supabase.from('profiles').select('*').order('full_name')
+    const { data } = await supabase.from('workers').select('*').order('full_name')
     setWorkers(data || [])
-  }, [isAdmin])
+  }, [])
   useEffect(() => { loadWorkers() }, [loadWorkers])
 
   const go = (id) => {
     setTab(id)
+    setMenu(false)
     history.replaceState(null, '', '#' + id)
     window.scrollTo({ top: 0 })
+    if (id === 'workers' || id === 'reports' || id === 'records') loadWorkers()
   }
 
   return (
-    <div className={`shell ${isAdmin ? 'is-admin' : ''}`}>
+    <div className="shell">
       <aside className="side">
         <div className="brand"><span className="logo sm"><Icon name="clock" size={18} /></span><b>بیتا</b></div>
         <nav>
@@ -104,29 +109,38 @@ function Shell({ profile }) {
             </button>
           ))}
         </nav>
-        <div className="side-user"><div className="avatar">{profile.full_name.trim()[0]}</div><div><b>{profile.full_name}</b><small className="muted">{isAdmin ? 'مدیر' : 'نیرو'}</small></div></div>
+        <div className="side-user"><div className="avatar">{profile.full_name.trim()[0]}</div><div><b>{profile.full_name}</b><small className="muted">{isAdmin ? 'مدیر' : 'سرپرست'}</small></div></div>
       </aside>
 
       <main className="main">
         <header className="topbar">
-          <div className="brand"><span className="logo sm"><Icon name="clock" size={18} /></span><b>بیتا</b></div>
-          <button className="avatar sm" title="حساب کاربری" aria-label="حساب کاربری" onClick={() => go('account')}>{profile.full_name.trim()[0]}</button>
+          <div className="brand"><span className="logo sm"><Icon name="clock" size={18} /></span><b>بیتا</b><span className="role-chip">{isAdmin ? 'مدیر' : 'سرپرست'}</span></div>
+          <div className="menu-wrap">
+            <button className="avatar sm" aria-label="منوی حساب" aria-expanded={menu} onClick={() => setMenu(!menu)}>{profile.full_name.trim()[0]}</button>
+            {menu && (
+              <div className="menu" role="menu">
+                {isAdmin && <button role="menuitem" onClick={() => go('users')}><Icon name="key" size={18} />کاربران سامانه</button>}
+                <button role="menuitem" onClick={() => go('account')}><Icon name="user" size={18} />حساب من</button>
+                <button role="menuitem" className="danger" onClick={() => supabase.auth.signOut()}><Icon name="logout" size={18} />خروج</button>
+              </div>
+            )}
+          </div>
         </header>
-        <div key={tab} className="view">
-          {tab === 'today' && <Today profile={profile} />}
-          {tab === 'reports' && <Suspense fallback={<div className="page-center"><Spinner size={28} /></div>}><Reports profile={profile} isAdmin={isAdmin} workers={workers} /></Suspense>}
+        <div key={tab} className="view" onClick={() => menu && setMenu(false)}>
+          {tab === 'board' && <Board isAdmin={isAdmin} />}
+          {tab === 'workers' && <Workers workers={workers} reload={loadWorkers} isAdmin={isAdmin} me={profile} />}
           {tab === 'account' && <Account profile={profile} />}
-          {tab === 'live' && <Live workers={workers} />}
-          {tab === 'workers' && <Workers workers={workers} reload={loadWorkers} me={profile} />}
-          {tab === 'stages' && <Stages />}
-          {tab === 'records' && <Records workers={workers} me={profile} />}
+          {isAdmin && tab === 'reports' && <Suspense fallback={<div className="page-center"><Spinner size={28} /></div>}><Reports workers={workers} /></Suspense>}
+          {isAdmin && tab === 'stages' && <Stages />}
+          {isAdmin && tab === 'records' && <Records workers={workers} me={profile} />}
+          {isAdmin && tab === 'users' && <Users me={profile} />}
         </div>
       </main>
 
       <nav className="bottom-nav">
-        {tabs.filter((t) => !isAdmin || t.id !== 'account').map((t) => (
+        {tabs.filter((t) => !isAdmin || !MOBILE_HIDDEN.has(t.id)).map((t) => (
           <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => go(t.id)} aria-current={tab === t.id ? 'page' : undefined}>
-            <Icon name={t.icon} size={22} /><span>{t.label}</span>
+            <Icon name={t.icon} size={22} /><span>{t.short || t.label}</span>
           </button>
         ))}
       </nav>
