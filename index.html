@@ -1,58 +1,17 @@
 <!doctype html>
 <html lang="fa" dir="rtl">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>بیتا | حضور و بهره‌وری نیروها</title>
-    <meta name="description" content="ثبت ورود و خروج، عملیات تولید و گزارش بهره‌وری نیروها" />
-    <meta name="theme-color" content="#3b2fc9" />
-    <link rel="icon" type="image/png" href="/bita-app/favicon.png" />
-    <link rel="manifest" href="/bita-app/manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="/bita-app/apple-touch-icon.png" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="بیتا" />
-    <script type="module" crossorigin src="/bita-app/assets/index-BJhru7DQ.js"></script>
-    <link rel="stylesheet" crossorigin href="/bita-app/assets/index-B0aQfLb8.css">
-  </head>
-  <body>
-    <div id="root">
-      <div id="boot" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;font-family:Tahoma,sans-serif;background:#f3f4fa;color:#171a2e;text-align:center;padding:24px">
-        <div style="width:56px;height:56px;border-radius:18px;background:linear-gradient(135deg,#5b4cf0,#8b5cf6);display:grid;place-items:center">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-        </div>
-        <b style="font-size:20px">بیتا</b>
-        <span id="boot-msg" style="color:#6b7090">در حال بارگذاری…</span>
-        <pre id="boot-err" style="display:none;direction:ltr;max-width:90vw;white-space:pre-wrap;font-size:12px;background:#fde8e8;color:#b91c1c;padding:10px;border-radius:10px"></pre>
-        <div id="boot-actions" style="display:none;gap:8px">
-          <button onclick="location.reload()" style="font:inherit;padding:10px 18px;border:0;border-radius:12px;background:#5b4cf0;color:#fff;cursor:pointer">تلاش دوباره</button>
-          <button onclick="bitaReset()" style="font:inherit;padding:10px 18px;border:0;border-radius:12px;background:#e6e8f2;color:#171a2e;cursor:pointer">پاک کردن حافظهٔ اپ</button>
-        </div>
-      </div>
-    </div>
-    <script>
-      // Shown only while the app has not started. Helps tell a slow/blocked network from an error.
-      window.bitaReset = async function () {
-        try { localStorage.clear(); sessionStorage.clear() } catch (e) {}
-        try { const r = await navigator.serviceWorker?.getRegistrations(); for (const x of r || []) await x.unregister() } catch (e) {}
-        try { for (const k of await caches.keys()) await caches.delete(k) } catch (e) {}
-        location.reload()
-      }
-      ;(function () {
-        var show = function (msg, err) {
-          var m = document.getElementById('boot-msg'); if (!m) return
-          m.textContent = msg
-          document.getElementById('boot-actions').style.display = 'flex'
-          if (err) { var e = document.getElementById('boot-err'); e.style.display = 'block'; e.textContent = String(err).slice(0, 400) }
-        }
-        setTimeout(function () { show('بارگذاری طول کشید. احتمالاً اینترنت این دستگاه کند است یا github.io روی این شبکه باز نمی‌شود. با اینترنت دیگری (مثلاً اینترنت گوشی) امتحان کنید.') }, 12000)
-        window.addEventListener('error', function (e) {
-          var t = e.target
-          if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) show('یکی از فایل‌های اپ دریافت نشد. اینترنت را بررسی و دوباره تلاش کنید.', (t.src || t.href))
-          else show('خطا در اجرای اپ', e.message)
-        }, true)
-      })()
-    </script>
-  </body>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>رویای بیتا — آدرس جدید</title>
+<meta http-equiv="refresh" content="1; url=https://royaye-bita.github.io/">
+<link rel="canonical" href="https://royaye-bita.github.io/">
+<script>
+  try { navigator.serviceWorker && navigator.serviceWorker.getRegistrations().then(function (r) { r.forEach(function (x) { x.unregister() }) }) } catch (e) {}
+  try { caches.keys().then(function (k) { k.forEach(function (n) { caches.delete(n) }) }) } catch (e) {}
+  location.replace('https://royaye-bita.github.io/' + (location.hash || ''))
+</script>
+</head>
+<body style="font-family:Tahoma,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#f3f4fa;text-align:center">
+  <div><h2>آدرس اپ عوض شد</h2><p>در حال انتقال به <a href="https://royaye-bita.github.io/">royaye-bita.github.io</a> …</p></div>
+</body>
 </html>
