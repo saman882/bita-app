@@ -669,3 +669,6 @@ tr.is-off { opacity: .5; }
 .heat-bad { background: var(--bad-soft); color: var(--bad); font-weight: 700; }
 .input.time { font-size: 1.15rem; font-weight: 700; letter-spacing: .04em; }
 .input.time.is-bad { border-color: var(--bad); background: var(--bad-soft); }
+
+.crash { gap: 10px; padding: 24px; }
+.crash-err { max-width: 92vw; white-space: pre-wrap; font-size: 12px; background: var(--bad-soft); color: var(--bad); padding: 10px 12px; border-radius: 12px; text-align: left; }
