@@ -26,7 +26,7 @@ export default function Login() {
       </div>
       <form className="login-card" onSubmit={submit}>
         <div className="logo"><Icon name="clock" size={30} stroke={2.2} /></div>
-        <h1>بیتا</h1>
+        <h1>رویای بیتا</h1>
         <p className="muted">ورود مدیر، ادمین و سرپرست</p>
 
         <label className="field">

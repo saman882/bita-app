@@ -109,7 +109,7 @@ function Shell({ profile, reloadProfile }) {
   return (
     <div className="shell">
       <aside className="side">
-        <div className="brand"><span className="logo sm"><Icon name="clock" size={18} /></span><b>بیتا</b></div>
+        <div className="brand"><span className="logo sm"><Icon name="clock" size={18} /></span><b>رویای بیتا</b></div>
         <nav>
           {tabs.map((t) => (
             <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => go(t.id)} aria-current={tab === t.id ? 'page' : undefined}>
@@ -122,7 +122,7 @@ function Shell({ profile, reloadProfile }) {
 
       <main className="main">
         <header className="topbar">
-          <div className="brand"><span className="logo sm"><Icon name="clock" size={18} /></span><b>بیتا</b><span className="role-chip">{ROLE[role]}</span></div>
+          <div className="brand"><span className="logo sm"><Icon name="clock" size={18} /></span><b>رویای بیتا</b><span className="role-chip">{ROLE[role]}</span></div>
           <button className="avatar sm" aria-label="حساب من" onClick={() => go('account')}>{profile.full_name.trim()[0]}</button>
         </header>
         <div key={tab} className="view">

@@ -421,5 +421,5 @@ async function buildWorkbook({ data, res, att, from, to, nameOf }) {
   book.Workbook = { Views: [{ RTL: true }] }
   const bytes = XLSX.write(book, { bookType: 'xlsx', type: 'array', compression: true })
   const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-  return saveBlob(blob, `bita-report-${jIso(from).replace(/\//g, '-')}_${jIso(to).replace(/\//g, '-')}.xlsx`)
+  return saveBlob(blob, `royaye-bita-report-${jIso(from).replace(/\//g, '-')}_${jIso(to).replace(/\//g, '-')}.xlsx`)
 }
