@@ -316,7 +316,7 @@ export default function Reports({ workers = [] }) {
           </section>
 
           <p className="formula-note">
-            <Icon name="target" size={14} /> بهره‌وری = ۱ − (زمان استاندارد − زمان واقعی) ÷ زمان استاندارد
+            <Icon name="target" size={14} /> بهره‌وری = زمان استاندارد ÷ زمان واقعی
             <br />
             <Icon name="bolt" size={14} /> کارکرد مؤثر = مجموع زمان عملیات ÷ مجموع زمان حضور (روزهایی که خروج ثبت شده)
           </p>

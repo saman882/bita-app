@@ -1,10 +1,10 @@
 import { weekStart, monthStart } from './fmt'
 
 /**
- * Efficiency (company formula, revised 1405/08/20): 1 − (standard − actual) / standard
- * Algebraically equal to actual / standard.
+ * Efficiency = standard time / actual time (chosen 1405/08/20).
+ * Faster than standard → above 100%; never negative.
  */
-export const efficiency = (actual, standard) => (standard > 0 ? 1 - (standard - actual) / standard : null)
+export const efficiency = (actual, standard) => (standard > 0 && actual > 0 ? standard / actual : null)
 
 /** Effective work = Σ operation time ÷ Σ presence time */
 export const effective = (opSec, presenceSec) => (presenceSec > 0 ? opSec / presenceSec : null)
