@@ -87,9 +87,18 @@ export default function Reports({ workers = [] }) {
   const t = res?.total
   const empty = data && data.jobs.length + data.att.length === 0
 
+  // fetch the Excel library in the background so the button works instantly, even on slow connections
+  useEffect(() => { const id = setTimeout(() => { loadXlsx().catch(() => {}) }, 1500); return () => clearTimeout(id) }, [])
+
   const exportXlsx = async () => {
     setExporting(true)
-    try { await buildWorkbook({ data, res, att, from, to, nameOf }) } catch (e) { toast(errText(e), 'bad') } finally { setExporting(false) }
+    try {
+      const how = await buildWorkbook({ data, res, att, from, to, nameOf })
+      toast(how === 'share' ? 'فایل اکسل آماده شد؛ از منوی اشتراک «Save to Files» را بزنید' : how === 'tab' ? 'فایل در صفحهٔ جدید باز شد' : 'فایل اکسل دانلود شد')
+    } catch (e) {
+      if (e?.name === 'AbortError') return
+      toast(/fetch|import|module|Load failed/i.test(e?.message || '') ? 'دریافت ابزار اکسل از سرور ناموفق بود؛ اینترنت را بررسی و صفحه را تازه کنید' : errText(e), 'bad')
+    } finally { setExporting(false) }
   }
 
   const effBar = (v) => (v >= 95 ? 'var(--good)' : v >= 80 ? 'var(--warn)' : 'var(--bad)')
@@ -328,8 +337,30 @@ function Tip({ active, payload, label, mode, unit }) {
 }
 
 /* ---------------- Excel export (mirrors the company workbook) ---------------- */
+let xlsxPromise = null
+const loadXlsx = () => (xlsxPromise ||= import('xlsx').catch((e) => { xlsxPromise = null; throw e }))
+
+/** Saves a Blob in a way that works on desktop, Android, iOS Safari and installed (home-screen) apps. */
+async function saveBlob(blob, filename) {
+  const ua = navigator.userAgent
+  const ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  const standalone = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone
+  const inApp = /Instagram|FBAN|FBAV|Telegram|WhatsApp|; wv\)/i.test(ua)
+  if (ios || standalone || inApp) {
+    const file = new File([blob], filename, { type: blob.type })
+    if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: filename }); return 'share' }
+  }
+  const url = URL.createObjectURL(blob)
+  if (ios || inApp) { window.open(url, '_blank'); setTimeout(() => URL.revokeObjectURL(url), 60000); return 'tab' }
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.rel = 'noopener'
+  document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
+  return 'download'
+}
+
 async function buildWorkbook({ data, res, att, from, to, nameOf }) {
-  const XLSX = await import('xlsx')
+  const XLSX = await loadXlsx()
   const r2 = (v, d = 2) => (v == null || !Number.isFinite(v) ? '' : Math.round(v * 10 ** d) / 10 ** d)
   const pctv = (v) => (v == null ? '' : r2(v * 100, 1))
   const book = XLSX.utils.book_new()
@@ -388,5 +419,7 @@ async function buildWorkbook({ data, res, att, from, to, nameOf }) {
   [11, 14, 8, 8, 10, 10, 16, 12])
 
   book.Workbook = { Views: [{ RTL: true }] }
-  XLSX.writeFile(book, `bita-report-${jIso(from).replace(/\//g, '-')}_${jIso(to).replace(/\//g, '-')}.xlsx`)
+  const bytes = XLSX.write(book, { bookType: 'xlsx', type: 'array', compression: true })
+  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  return saveBlob(blob, `bita-report-${jIso(from).replace(/\//g, '-')}_${jIso(to).replace(/\//g, '-')}.xlsx`)
 }
