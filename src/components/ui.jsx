@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import { fa, toEn, jParts, isoFromJ, jMonthLen, MONTHS } from '../lib/fmt'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { fa, toEn, jParts, isoFromJ, jMonthLen, MONTHS, tehranIso, isoToDate, normalizeFa } from '../lib/fmt'
 
 /* ---------------- Icons (stroke, 24px grid) ---------------- */
 const P = {
@@ -23,6 +23,9 @@ const P = {
   key: 'M5 11h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1zM8 11V7a4 4 0 1 1 8 0v4',
   alert: 'M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0',
   refresh: 'M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5',
+  chev: 'm9 6 6 6-6 6',
+  cal: 'M3 9h18M7 3v4M17 3v4M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z',
+  tag: 'M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9zM7.5 7.5h.01',
   search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16M21 21l-4.3-4.3',
   eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6',
   bolt: 'M13 2 4 14h7l-1 8 9-12h-7z',
@@ -159,3 +162,115 @@ export function NumInput({ value, onChange, ...rest }) {
       onChange={(e) => onChange(toEn(e.target.value).replace(/[^\d.]/g, ''))} {...rest} />
   )
 }
+
+/* ---------------- Jalali month calendar ---------------- */
+const WD = ['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج']
+/** marks: Set of ISO dates that have data. maxIso: last selectable day. */
+export function JCalendar({ value, onChange, marks, maxIso = tehranIso(), onMonth }) {
+  const v = jParts(value)
+  const [view, setView] = useState({ jy: v.jy, jm: v.jm })
+  useEffect(() => { setView({ jy: v.jy, jm: v.jm }) }, [v.jy, v.jm])
+  useEffect(() => { onMonth?.(isoFromJ(view.jy, view.jm, 1), isoFromJ(view.jy, view.jm, jMonthLen(view.jy, view.jm))) }, [view, onMonth])
+  const len = jMonthLen(view.jy, view.jm)
+  const first = isoFromJ(view.jy, view.jm, 1)
+  const lead = (isoToDate(first).getUTCDay() + 1) % 7 // Saturday = 0
+  const today = tehranIso()
+  const step = (d) => setView(({ jy, jm }) => { let m = jm + d, y = jy; if (m < 1) { m = 12; y-- } if (m > 12) { m = 1; y++ } return { jy: y, jm: m } })
+  const cells = []
+  for (let i = 0; i < lead; i++) cells.push(null)
+  for (let d = 1; d <= len; d++) cells.push(d)
+  return (
+    <div className="jcal">
+      <div className="jcal-head">
+        <button className="icon-btn" onClick={() => step(-1)} aria-label="ماه قبل"><Icon name="chev" size={18} /></button>
+        <b>{MONTHS[view.jm - 1]} {fa(view.jy)}</b>
+        <button className="icon-btn" onClick={() => step(1)} aria-label="ماه بعد"><Icon name="chev" size={18} className="flip" /></button>
+      </div>
+      <div className="jcal-grid">
+        {WD.map((w) => <span key={w} className="jcal-wd">{w}</span>)}
+        {cells.map((d, i) => {
+          if (!d) return <span key={'e' + i} />
+          const iso = isoFromJ(view.jy, view.jm, d)
+          const dis = iso > maxIso
+          return (
+            <button key={iso} disabled={dis} onClick={() => onChange(iso)}
+              className={`jcal-day ${iso === value ? 'on' : ''} ${iso === today ? 'today' : ''} ${i % 7 === 6 ? 'fri' : ''}`}>
+              {fa(d)}{marks?.has(iso) && <i className="jcal-dot" />}
+            </button>
+          )
+        })}
+      </div>
+      {value !== today && <button className="jcal-today" onClick={() => onChange(today)}>برو به امروز</button>}
+    </div>
+  )
+}
+
+/* ---------------- Searchable picker (opens a sheet) ---------------- */
+export function SearchSelect({ label, items, value, onChange, placeholder = 'انتخاب کنید', allLabel, render, group }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const sel = items.find((i) => String(i.id) === String(value))
+  const list = useMemo(() => {
+    const t = normalizeFa(q).trim()
+    return t ? items.filter((i) => normalizeFa(i.name).includes(t) || (i.sub && normalizeFa(i.sub).includes(t))) : items
+  }, [q, items])
+  return (
+    <>
+      <button type="button" className="input picker" onClick={() => { setQ(''); setOpen(true) }} aria-label={label}>
+        <span className={sel || (allLabel && value == null) ? '' : 'muted'}>{sel ? sel.name : value == null && allLabel ? allLabel : placeholder}</span>
+        <Icon name="search" size={16} />
+      </button>
+      <Sheet open={open} onClose={() => setOpen(false)} title={label}>
+        <div className="input-ic search sticky-search">
+          <Icon name="search" size={18} />
+          <input className="input" autoFocus placeholder="جستجو…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="pick-list">
+          {allLabel && !q && (
+            <button className={`pick-item ${value == null ? 'on' : ''}`} onClick={() => { onChange(null); setOpen(false) }}><b>{allLabel}</b></button>
+          )}
+          {list.map((i, idx) => (
+            <div key={i.id}>
+              {group && (idx === 0 || list[idx - 1][group] !== i[group]) && <div className="pick-group">{i[group]}</div>}
+              <button className={`pick-item ${String(i.id) === String(value) ? 'on' : ''}`} onClick={() => { onChange(i.id); setOpen(false) }}>
+                {render ? render(i) : <><b>{i.name}</b>{i.sub && <small className="muted">{i.sub}</small>}</>}
+              </button>
+            </div>
+          ))}
+          {list.length === 0 && <p className="muted center">موردی پیدا نشد</p>}
+        </div>
+      </Sheet>
+    </>
+  )
+}
+
+/** Valid "HH:MM" 24h string? */
+export const isTime = (t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(t || '')
+
+/** 24-hour time field: type digits (Persian or Latin), colon is added automatically. "730" → 07:30 on blur. */
+export function TimeInput({ value, onChange, ...rest }) {
+  const shape = (raw) => {
+    const d = toEn(raw).replace(/\D/g, '').slice(0, 4)
+    return d.length <= 2 ? d : `${d.slice(0, 2)}:${d.slice(2)}`
+  }
+  const finish = () => {
+    const d = toEn(value || '').replace(/\D/g, '')
+    if (!d) return onChange('')
+    const full = d.length <= 2 ? d.padStart(2, '0') + '00' : d.length === 3 ? '0' + d : d
+    onChange(`${full.slice(0, 2)}:${full.slice(2, 4)}`)
+  }
+  const bad = value && value.length >= 4 && !isTime(value)
+  return (
+    <input className={`input time ${bad ? 'is-bad' : ''}`} dir="ltr" inputMode="numeric" placeholder="--:--" maxLength={5}
+      value={fa(value || '')} onChange={(e) => onChange(shape(e.target.value))} onBlur={finish} {...rest} />
+  )
+}
+
+/** Inline search box */
+export const SearchBox = ({ value, onChange, placeholder = 'جستجو…' }) => (
+  <div className="input-ic search">
+    <Icon name="search" size={18} />
+    <input className="input" placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+    {value && <button className="icon-btn eye" onClick={() => onChange('')} aria-label="پاک کردن"><Icon name="x" size={16} /></button>}
+  </div>
+)

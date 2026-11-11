@@ -1,21 +1,38 @@
 import { useState } from 'react'
-import { supabase, errText, normPw } from '../lib/supabase'
+import { supabase, errText, normPw, normUser, adminUsers } from '../lib/supabase'
+import { normalizeFa } from '../lib/fmt'
 import { Button, Field, useToast } from '../components/ui'
+import { ROLE } from './People'
 
-export default function Account({ profile }) {
+/** Any role: change own display name, username and password. */
+export default function Account({ profile, onChanged }) {
   const toast = useToast()
+  const [name, setName] = useState(profile.full_name)
+  const [user, setUser] = useState(profile.username)
   const [p1, setP1] = useState('')
   const [p2, setP2] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState(null)
 
-  const change = async () => {
-    const a = normPw(p1), b = normPw(p2)
+  const saveInfo = async () => {
+    const full_name = normalizeFa(name).trim()
+    const username = normUser(user)
+    if (!full_name) return toast('نام نمایشی نمی‌تواند خالی باشد', 'bad')
+    setBusy('info')
+    try {
+      await adminUsers({ action: 'self_update', full_name, username })
+      toast(username !== profile.username ? `ذخیره شد. از این به بعد با «${username}» وارد شوید.` : 'ذخیره شد')
+      onChanged?.()
+    } catch (e) { toast(errText(e), 'bad') } finally { setBusy(null) }
+  }
+
+  const savePw = async () => {
+    const a = normPw(p1)
     if (a.length < 6) return toast('رمز باید حداقل ۶ کاراکتر باشد', 'bad')
-    if (a !== b) return toast('تکرار رمز یکسان نیست', 'bad')
-    setBusy(true)
+    if (a !== normPw(p2)) return toast('تکرار رمز یکسان نیست', 'bad')
+    setBusy('pw')
     const { error } = await supabase.auth.updateUser({ password: a })
-    setBusy(false)
-    if (error) return toast(errText(error), 'bad')
+    setBusy(null)
+    if (error) return toast(/different|same/i.test(error.message) ? 'رمز جدید باید با رمز فعلی فرق داشته باشد' : errText(error), 'bad')
     setP1(''); setP2('')
     toast('رمز عبور تغییر کرد')
   }
@@ -26,38 +43,31 @@ export default function Account({ profile }) {
         <div className="avatar xl">{profile.full_name.trim()[0]}</div>
         <div>
           <h1>{profile.full_name}</h1>
-          <p className="muted"><span dir="ltr">{profile.username}</span> · {profile.role === 'admin' ? 'مدیر' : 'سرپرست'}</p>
+          <p className="muted"><span dir="ltr">{profile.username}</span> · {ROLE[profile.role]}</p>
         </div>
       </div>
 
       <section className="card">
-        <div className="card-head"><h2>تغییر رمز عبور</h2></div>
+        <div className="card-head"><h2>نام و نام کاربری</h2></div>
         <div className="form">
-          <Field label="رمز جدید" hint="به حروف بزرگ و کوچک حساس نیست"><input className="input" dir="ltr" type="password" autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} /></Field>
-          <Field label="تکرار رمز جدید"><input className="input" dir="ltr" type="password" autoComplete="new-password" value={p2} onChange={(e) => setP2(e.target.value)} /></Field>
-          <Button icon="key" loading={busy} onClick={change}>ذخیرهٔ رمز</Button>
+          <Field label="نام نمایشی" hint="مثلاً به‌جای «مدیر» بنویسید «گودرزی»"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <Field label="نام کاربری" hint="حروف انگلیسی و عدد؛ به حروف بزرگ و کوچک حساس نیست">
+            <input className="input" dir="ltr" autoCapitalize="none" autoComplete="username" value={user} onChange={(e) => setUser(e.target.value)} />
+          </Field>
+          <Button icon="check" loading={busy === 'info'} disabled={name === profile.full_name && normUser(user) === profile.username} onClick={saveInfo}>ذخیره</Button>
         </div>
       </section>
 
-      <InstallHint />
+      <section className="card">
+        <div className="card-head"><h2>تغییر رمز عبور</h2></div>
+        <div className="form">
+          <Field label="رمز جدید" hint="به حروف بزرگ و کوچک حساس است"><input className="input" dir="ltr" type="password" autoCapitalize="none" autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} /></Field>
+          <Field label="تکرار رمز جدید"><input className="input" dir="ltr" type="password" autoCapitalize="none" autoComplete="new-password" value={p2} onChange={(e) => setP2(e.target.value)} /></Field>
+          <Button icon="key" loading={busy === 'pw'} onClick={savePw}>ذخیرهٔ رمز</Button>
+        </div>
+      </section>
 
       <Button variant="ghost-danger" icon="logout" className="btn-block" onClick={() => supabase.auth.signOut()}>خروج از حساب</Button>
     </div>
-  )
-}
-
-function InstallHint() {
-  const standalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone
-  if (standalone) return null
-  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent)
-  return (
-    <section className="card install">
-      <div className="card-head"><h2>نصب روی گوشی</h2></div>
-      {ios ? (
-        <p>در Safari دکمهٔ <b>Share</b> (مربع با فلش رو به بالا) را بزنید و <b>Add to Home Screen</b> را انتخاب کنید.</p>
-      ) : (
-        <p>در Chrome منوی <b>⋮</b> را باز کنید و <b>Install app</b> یا <b>Add to Home screen</b> را بزنید.</p>
-      )}
-    </section>
   )
 }

@@ -9,9 +9,9 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 })
 
 const DIG = (s) => String(s ?? '').replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
-/** Usernames and passwords are case-insensitive: always lower-cased (and Persian digits converted). */
+/** Usernames are case-insensitive (lower-cased). Passwords are case-SENSITIVE: only Persian digits are converted. */
 export const normUser = (u) => DIG(u).trim().toLowerCase()
-export const normPw = (p) => DIG(p).trim().toLowerCase()
+export const normPw = (p) => DIG(p)
 export const usernameToEmail = (u) => `${normUser(u)}@${LOGIN_DOMAIN}`
 
 /** Turns Supabase / Postgres errors into a readable Persian message. */

@@ -27,7 +27,7 @@ export default function Login() {
       <form className="login-card" onSubmit={submit}>
         <div className="logo"><Icon name="clock" size={30} stroke={2.2} /></div>
         <h1>بیتا</h1>
-        <p className="muted">ورود مدیر و سرپرست</p>
+        <p className="muted">ورود مدیر، ادمین و سرپرست</p>
 
         <label className="field">
           <span className="field-label">نام کاربری</span>
@@ -40,7 +40,7 @@ export default function Login() {
           <span className="field-label">رمز عبور</span>
           <div className="input-ic">
             <Icon name="key" size={18} />
-            <input className="input" dir="ltr" type={show ? 'text' : 'password'} autoComplete="current-password" value={p} onChange={(e) => setP(e.target.value)} />
+            <input className="input" dir="ltr" type={show ? 'text' : 'password'} autoCapitalize="none" autoCorrect="off" autoComplete="current-password" value={p} onChange={(e) => setP(e.target.value)} />
             <button type="button" className="icon-btn eye" onClick={() => setShow(!show)} aria-label={show ? 'پنهان کردن رمز' : 'نمایش رمز'}><Icon name="eye" size={18} /></button>
           </div>
         </label>
