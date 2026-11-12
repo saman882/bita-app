@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, errText } from '../lib/supabase'
 import { efficiency } from '../lib/calc'
-import { fa, num, pct, jDateLong, tehranIso, addDays, shortTime, normalizeFa, inDiffLabel, outDiffLabel, humanDur, toEn } from '../lib/fmt'
+import { useAccess, can } from '../lib/access'
+import { useWorkHours, defaultsFor, dayKind, dayMetrics } from '../lib/hours'
+import { fa, num, pct, jDateLong, tehranIso, addDays, normalizeFa, humanDur, toEn } from '../lib/fmt'
 import { Icon, Button, Sheet, Field, NumInput, Empty, Spinner, useToast, effTone, JCalendar, SearchSelect, TimeInput, SearchBox, JDateInput, isTime } from '../components/ui'
+import SalesEntry from './SalesEntry'
 
 const t5 = (t) => (t ? String(t).slice(0, 5) : '')
 const mins = (a, b) => {
@@ -11,32 +14,82 @@ const mins = (a, b) => {
   return h2 * 60 + m2 - (h1 * 60 + m1)
 }
 
-/** Loads catalog lists (products with type, operations) visible to any staff role. */
+/** Catalog lists (products with group, operations) — readable by any staff. */
 export function useCatalog() {
-  const [cat, setCat] = useState({ products: [], stages: [], loaded: false })
+  const [cat, setCat] = useState({ products: [], stages: [], types: [], loaded: false })
   const load = useCallback(async () => {
-    const [p, s] = await Promise.all([
-      supabase.from('products').select('id, name, active, type_id, product_types(name, sort_order)').order('name'),
-      supabase.from('stages').select('id, name, color, sort_order, active').order('sort_order').order('id'),
+    const [p, s, t] = await Promise.all([
+      supabase.from('products').select('id, name, active, price, type_id, product_types(name, sort_order)').order('name'),
+      supabase.from('stages').select('id, name, color, sort_order, active, is_packaging').order('sort_order').order('id'),
+      supabase.from('product_types').select('*').order('sort_order'),
     ])
     const products = (p.data || []).map((x) => ({ ...x, type: x.product_types?.name, typeOrder: x.product_types?.sort_order ?? 0, sub: x.product_types?.name }))
       .sort((a, b) => a.typeOrder - b.typeOrder || a.name.localeCompare(b.name, 'fa'))
-    setCat({ products, stages: s.data || [], loaded: true })
+    setCat({ products, stages: s.data || [], types: t.data || [], loaded: true })
   }, [])
   useEffect(() => { load() }, [load])
   return [cat, load]
 }
 
-export default function Entry({ isManager }) {
-  const toast = useToast()
+/** Date bar + calendar shared by production and sales entry. */
+export function DatePicker({ date, setDate, kind, extra }) {
   const today = tehranIso()
-  const [date, setDate] = useState(today)
-  const [calOpen, setCalOpen] = useState(false)
+  const [open, setOpen] = useState(false)
   const [marks, setMarks] = useState(new Set())
+  const loadMarks = useCallback(async (from, to) => {
+    const { data } = await supabase.rpc('days_with_data', { p_from: from, p_to: to, p_kind: kind })
+    setMarks(new Set(data || []))
+  }, [kind])
+  return (
+    <>
+      <div className="datebar card">
+        <button className="icon-btn" onClick={() => setDate(addDays(date, -1))} aria-label="روز قبل"><Icon name="chev" /></button>
+        <button className="datebar-main" onClick={() => setOpen(true)}>
+          <Icon name="cal" size={20} />
+          <div><b>{jDateLong(date)}</b><small className="muted">{date === today ? 'امروز' : 'برای تغییر تاریخ بزنید'}{extra ? ` · ${extra}` : ''}</small></div>
+        </button>
+        <button className="icon-btn" onClick={() => setDate(addDays(date, 1))} disabled={date >= today} aria-label="روز بعد"><Icon name="chev" className="flip" /></button>
+      </div>
+      <Sheet open={open} onClose={() => setOpen(false)} title="انتخاب تاریخ">
+        <JCalendar value={date} marks={marks} onMonth={loadMarks} onChange={(d) => { setDate(d); setOpen(false) }} />
+        <p className="muted small center">روزهایی که نقطه دارند اطلاعات ثبت‌شده دارند.</p>
+      </Sheet>
+    </>
+  )
+}
+
+export default function Entry() {
+  const access = useAccess()
+  const tabs = [can(access, 'entry_production') && ['production', 'ثبت روزانهٔ تولید', 'layers'], can(access, 'entry_sales') && ['sales', 'ثبت روزانهٔ فروش', 'tag']].filter(Boolean)
+  const [tab, setTab] = useState(tabs[0]?.[0])
+  const [date, setDate] = useState(tehranIso())
+  if (!tabs.length) return <div className="page"><Empty icon="alert" title="به ثبت روزانه دسترسی ندارید" /></div>
+  return (
+    <div className="page">
+      <div className="page-title"><h1>ثبت روزانه</h1></div>
+      {tabs.length > 1 && (
+        <div className="tabs" role="tablist">
+          {tabs.map(([k, l, ic]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon name={ic} size={16} />{l}</button>)}
+        </div>
+      )}
+      {tab === 'production' ? <ProductionEntry date={date} setDate={setDate} /> : <SalesEntry date={date} setDate={setDate} />}
+    </div>
+  )
+}
+
+/* =====================================================================
+   PRODUCTION + ATTENDANCE
+   ===================================================================== */
+function ProductionEntry({ date, setDate }) {
+  const toast = useToast()
+  const access = useAccess()
+  const showEff = can(access, 'reports_staff')
   const [rows, setRows] = useState(null)
   const [q, setQ] = useState('')
-  const [open, setOpen] = useState(null) // worker id for detail sheet
+  const [open, setOpen] = useState(null)
   const [cat] = useCatalog()
+  const [wh, reloadWh] = useWorkHours()
+  const [hoursOpen, setHoursOpen] = useState(false)
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.rpc('day_sheet', { p_date: date })
@@ -45,103 +98,119 @@ export default function Entry({ isManager }) {
   }, [date, toast])
   useEffect(() => { setRows(null); load() }, [load])
 
-  const loadMarks = useCallback(async (from, to) => {
-    const { data } = await supabase.rpc('days_with_data', { p_from: from, p_to: to })
-    setMarks(new Set(data || []))
-  }, [])
-
   const list = useMemo(() => {
     const t = normalizeFa(q).trim()
     return (rows || []).filter((r) => !t || normalizeFa(r.full_name).includes(t) || (r.personnel_code || '').includes(toEn(t)))
   }, [rows, q])
-
   const worker = rows?.find((r) => r.id === open)
-  const doneCount = (rows || []).filter((r) => r.att || r.jobs?.length).length
+  const saved = (rows || []).filter((r) => r.att).length
 
   return (
-    <div className="page">
-      <div className="page-title">
-        <h1>ثبت روزانه</h1>
-      </div>
+    <>
+      <DatePicker date={date} setDate={setDate} kind="production" extra={`حضور ${fa(saved)} از ${fa(rows?.length ?? 0)} همکار ثبت شده`} />
 
-      {/* date bar */}
-      <div className="datebar card">
-        <button className="icon-btn" onClick={() => setDate(addDays(date, -1))} aria-label="روز قبل"><Icon name="chev" /></button>
-        <button className="datebar-main" onClick={() => setCalOpen(true)}>
-          <Icon name="cal" size={20} />
-          <div>
-            <b>{jDateLong(date)}</b>
-            <small className="muted">{date === today ? 'امروز' : 'برای تغییر تاریخ بزنید'} · {fa(doneCount)} از {fa(rows?.length ?? 0)} نیرو ثبت شده</small>
-          </div>
-        </button>
-        <button className="icon-btn" onClick={() => setDate(addDays(date, 1))} disabled={date >= today} aria-label="روز بعد"><Icon name="chev" className="flip" /></button>
+      <div className="hours-bar card">
+        <div className="hours-items">
+          <span><b>شنبه تا چهارشنبه</b> {fa(wh.weekday.in)}–{fa(wh.weekday.out)}</span>
+          <span><b>پنجشنبه</b> {fa(wh.thursday.in)}–{fa(wh.thursday.out)}</span>
+          <span><b>صبحانه</b> {fa(wh.breakfast.start)}–{fa(wh.breakfast.end)}</span>
+          <span><b>ناهار</b> {fa(wh.lunch.start)}–{fa(wh.lunch.end)}</span>
+          <span><b>استراحت</b> {fa(wh.rest.start)}–{fa(wh.rest.end)}</span>
+        </div>
+        {can(access, 'settings') && <Button variant="ghost" icon="edit" onClick={() => setHoursOpen(true)}>تغییر پیش‌فرض‌ها</Button>}
       </div>
+      {dayKind(date) === 'friday' && <div className="banner banner-warn"><Icon name="alert" /><div>این روز جمعه است؛ ساعت ورود و خروج پیش‌فرض ندارد. اگر کسی سر کار بوده دستی وارد کنید (همه‌اش اضافه‌کار حساب می‌شود).</div></div>}
 
-      <SearchBox value={q} onChange={setQ} placeholder="جستجوی نام نیرو…" />
+      <SearchBox value={q} onChange={setQ} placeholder="جستجوی نام همکار…" />
 
       {!rows ? <div className="page-center"><Spinner size={28} /></div> : list.length === 0 ? (
-        <Empty icon="users" title={rows.length ? 'نیرویی با این نام پیدا نشد' : 'هنوز نیرویی تعریف نشده'} />
+        <Empty icon="users" title={rows.length ? 'همکاری با این نام پیدا نشد' : 'هنوز همکاری تعریف نشده'} />
       ) : (
         <div className="entry-list">
-          {list.map((r) => <WorkerRow key={r.id} r={r} date={date} isManager={isManager} onSaved={load} onOpen={() => setOpen(r.id)} />)}
+          {list.map((r) => <WorkerRow key={r.id} r={r} date={date} wh={wh} showEff={showEff} onSaved={load} onOpen={() => setOpen(r.id)} />)}
         </div>
       )}
 
-      <Sheet open={calOpen} onClose={() => setCalOpen(false)} title="انتخاب تاریخ">
-        <JCalendar value={date} marks={marks} onMonth={loadMarks} onChange={(d) => { setDate(d); setCalOpen(false) }} />
-        <p className="muted small center">روزهایی که نقطه دارند اطلاعات ثبت‌شده دارند.</p>
-      </Sheet>
+      {worker && <WorkerDay worker={worker} date={date} cat={cat} showEff={showEff} onClose={() => setOpen(null)} onSaved={load} />}
+      {hoursOpen && <HoursEditor wh={wh} onClose={() => setHoursOpen(false)} onSaved={() => { setHoursOpen(false); reloadWh() }} />}
+    </>
+  )
+}
 
-      {worker && (
-        <WorkerDay worker={worker} date={date} cat={cat} isManager={isManager} onClose={() => setOpen(null)} onSaved={load} />
-      )}
+const ATT_FIELDS = ['clock_in', 'clock_out', 'breakfast_start', 'breakfast_end', 'lunch_start', 'lunch_end', 'rest_start', 'rest_end']
+
+function TimePair({ label, value, onChange, a, b }) {
+  return (
+    <div className="tpair"><span>{label}</span>
+      <TimeInput value={value[a]} onChange={(v) => onChange(a, v)} aria-label={`${label} از`} /><i>تا</i>
+      <TimeInput value={value[b]} onChange={(v) => onChange(b, v)} aria-label={`${label} تا`} />
     </div>
   )
 }
 
-/* ---------- one worker in the day list: attendance inline ---------- */
-function WorkerRow({ r, date, isManager, onSaved, onOpen }) {
+function WorkerRow({ r, date, wh, showEff, onSaved, onOpen }) {
   const toast = useToast()
-  const [cin, setCin] = useState(t5(r.att?.clock_in))
-  const [cout, setCout] = useState(t5(r.att?.clock_out))
+  const initial = useMemo(() => (r.att ? Object.fromEntries(ATT_FIELDS.map((k) => [k, t5(r.att[k])])) : defaultsFor(date, wh)), [r.att, date, wh])
+  const [f, setF] = useState(initial)
   const [busy, setBusy] = useState(false)
-  useEffect(() => { setCin(t5(r.att?.clock_in)); setCout(t5(r.att?.clock_out)) }, [r.att?.clock_in, r.att?.clock_out, date])
-  const dirty = cin !== t5(r.att?.clock_in) || cout !== t5(r.att?.clock_out)
+  useEffect(() => { setF(initial) }, [initial])
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }))
+  const dirty = !r.att || ATT_FIELDS.some((k) => f[k] !== initial[k])
   const jobs = r.jobs || []
   const Q = jobs.reduce((s, j) => s + Number(j.quantity), 0)
   let A = 0, S = 0
-  if (isManager) for (const j of jobs) if (j.actual != null && j.std_seconds != null) { A += Number(j.actual); S += Number(j.quantity) * Number(j.std_seconds) }
-  const eff = isManager ? efficiency(A, S) : null
-  const il = isManager && r.att?.in_diff != null ? inDiffLabel(Number(r.att.in_diff)) : null
-  const ol = isManager && r.att?.out_diff != null ? outDiffLabel(Number(r.att.out_diff)) : null
+  if (showEff) for (const j of jobs) if (j.actual != null && j.std_seconds != null) { A += Number(j.actual); S += Number(j.quantity) * Number(j.std_seconds) }
+  const eff = showEff ? efficiency(A, S) : null
+  const m = dayMetrics({ ...f, work_date: date }, wh)
 
   const save = async () => {
-    if ((cin && !isTime(cin)) || (cout && !isTime(cout))) return toast('ساعت را به شکل ۲۴ ساعته وارد کنید، مثلاً ۰۷:۳۰ یا ۱۶:۴۵', 'bad')
-    if (cin && cout && cout <= cin) return toast('ساعت خروج باید بعد از ورود باشد', 'bad')
+    for (const k of ATT_FIELDS) if (f[k] && !isTime(f[k])) return toast('ساعت را به شکل ۲۴ ساعته وارد کنید، مثلاً ۰۷:۳۰', 'bad')
+    if (!f.clock_in && !f.clock_out) return toast('ساعت ورود یا خروج را وارد کنید', 'bad')
+    if (f.clock_in && f.clock_out && f.clock_out <= f.clock_in) return toast('ساعت خروج باید بعد از ورود باشد', 'bad')
+    for (const [a, b, n] of [['breakfast_start', 'breakfast_end', 'صبحانه'], ['lunch_start', 'lunch_end', 'ناهار'], ['rest_start', 'rest_end', 'استراحت']]) {
+      if (!!f[a] !== !!f[b]) return toast(`شروع و پایان ${n} را هر دو وارد کنید یا هر دو را خالی بگذارید`, 'bad')
+      if (f[a] && f[b] <= f[a]) return toast(`پایان ${n} باید بعد از شروع آن باشد`, 'bad')
+    }
     setBusy(true)
-    const { error } = await supabase.rpc('save_attendance', { p_worker: r.id, p_date: date, p_in: cin || null, p_out: cout || null })
+    const { error } = await supabase.rpc('save_attendance', {
+      p_worker: r.id, p_date: date, p_in: f.clock_in || null, p_out: f.clock_out || null,
+      p_bf_start: f.breakfast_start || null, p_bf_end: f.breakfast_end || null, p_lunch_start: f.lunch_start || null, p_lunch_end: f.lunch_end || null,
+      p_rest_start: f.rest_start || null, p_rest_end: f.rest_end || null,
+    })
     setBusy(false)
     if (error) return toast(errText(error), 'bad')
-    toast(`حضور «${r.full_name}» ذخیره شد`)
-    onSaved()
+    toast(`حضور «${r.full_name}» ذخیره شد`); onSaved()
+  }
+  const clear = async () => {
+    setBusy(true)
+    const { error } = await supabase.rpc('save_attendance', { p_worker: r.id, p_date: date, p_in: null, p_out: null, p_bf_start: null, p_bf_end: null, p_lunch_start: null, p_lunch_end: null, p_rest_start: null, p_rest_end: null })
+    setBusy(false)
+    if (error) return toast(errText(error), 'bad')
+    toast(`حضور «${r.full_name}» حذف شد`); onSaved()
   }
 
   return (
-    <div className={`erow ${r.att || jobs.length ? 'has' : ''} ${r.active ? '' : 'is-off'}`}>
+    <div className={`erow ${r.att ? 'has' : 'draft'} ${r.active ? '' : 'is-off'}`}>
       <div className="erow-head">
         <div className="avatar">{r.full_name.trim()[0]}</div>
         <div className="grow">
           <b>{r.full_name}</b>
-          <small className="muted">شیفت {shortTime(r.shift_start)}–{shortTime(r.shift_end)}{r.personnel_code && <> · کد {fa(r.personnel_code)}</>}</small>
+          <small className="muted">{r.att ? 'حضور ثبت شده' : 'ساعت‌های پیش‌فرض — هنوز ثبت نشده'}{r.personnel_code && <> · کد {fa(r.personnel_code)}</>}</small>
         </div>
         {eff != null && <span className={`badge badge-${effTone(eff)}`}>{pct(eff)}</span>}
       </div>
-      <div className="erow-att">
-        <label><span>ورود</span><TimeInput value={cin} onChange={setCin} aria-label={`ساعت ورود ${r.full_name}`} /></label>
-        <label><span>خروج</span><TimeInput value={cout} onChange={setCout} aria-label={`ساعت خروج ${r.full_name}`} /></label>
-        {dirty && <Button icon="check" loading={busy} onClick={save} className="erow-save">ذخیره</Button>}
+      <div className="erow-times">
+        <TimePair label="ورود و خروج" value={f} onChange={set} a="clock_in" b="clock_out" />
+        <TimePair label="صبحانه" value={f} onChange={set} a="breakfast_start" b="breakfast_end" />
+        <TimePair label="ناهار" value={f} onChange={set} a="lunch_start" b="lunch_end" />
+        <TimePair label="استراحت" value={f} onChange={set} a="rest_start" b="rest_end" />
       </div>
-      {(il || ol) && <div className="erow-diff">{il && <em className={`tone-${il.tone}`}>{il.text}</em>}{ol && <em className={`tone-${ol.tone}`}>{ol.text}</em>}</div>}
+      {m && <small className="muted erow-sum">کارکرد {humanDur(m.work * 60)}{m.overtime > 0 && <> · <b className="tone-info">اضافه‌کار {humanDur(m.overtime * 60)}</b></>}</small>}
+      <div className="erow-btns">
+        {dirty && <Button icon="check" loading={busy} onClick={save} className="grow">{r.att ? 'ذخیرهٔ تغییرات' : 'ثبت حضور'}</Button>}
+        {r.att && !dirty && <span className="muted small grow saved-note"><Icon name="check" size={14} /> ذخیره شده</span>}
+        {r.att && <Button variant="ghost-danger" icon="trash" loading={busy} onClick={clear}>حذف حضور</Button>}
+      </div>
       <button className="erow-jobs" onClick={onOpen}>
         <Icon name="layers" size={18} />
         <span className="grow">{jobs.length ? <>{fa(jobs.length)} عملیات · {num(Q)} تولید</> : 'هنوز عملیاتی ثبت نشده'}</span>
@@ -151,21 +220,51 @@ function WorkerRow({ r, date, isManager, onSaved, onOpen }) {
   )
 }
 
-/* ---------- one worker, one day: operations ---------- */
+function HoursEditor({ wh, onClose, onSaved }) {
+  const toast = useToast()
+  const [f, setF] = useState(() => JSON.parse(JSON.stringify(wh)))
+  const [busy, setBusy] = useState(false)
+  const flat = { wi: f.weekday.in, wo: f.weekday.out, ti: f.thursday.in, to: f.thursday.out, bs: f.breakfast.start, be: f.breakfast.end, ls: f.lunch.start, le: f.lunch.end, rs: f.rest.start, re: f.rest.end }
+  const map = { wi: ['weekday', 'in'], wo: ['weekday', 'out'], ti: ['thursday', 'in'], to: ['thursday', 'out'], bs: ['breakfast', 'start'], be: ['breakfast', 'end'], ls: ['lunch', 'start'], le: ['lunch', 'end'], rs: ['rest', 'start'], re: ['rest', 'end'] }
+  const set = (k, v) => { const [g, kk] = map[k]; setF((x) => ({ ...x, [g]: { ...x[g], [kk]: v } })) }
+  const save = async () => {
+    for (const [a, b] of [['wi', 'wo'], ['ti', 'to'], ['bs', 'be'], ['ls', 'le'], ['rs', 're']]) {
+      if (!isTime(flat[a]) || !isTime(flat[b]) || flat[b] <= flat[a]) return toast('همهٔ ساعت‌ها را درست و به شکل ۲۴ ساعته وارد کنید', 'bad')
+    }
+    setBusy(true)
+    const { error } = await supabase.from('app_settings').update({ value: f }).eq('key', 'work_hours')
+    setBusy(false)
+    if (error) return toast(errText(error), 'bad')
+    toast('ساعت‌های پیش‌فرض ذخیره شد'); onSaved()
+  }
+  return (
+    <Sheet open onClose={onClose} title="ساعت‌های کاری پیش‌فرض" footer={<Button className="btn-block" icon="check" loading={busy} onClick={save}>ذخیره</Button>}>
+      <div className="form">
+        <p className="muted small">این ساعت‌ها برای همهٔ همکاران پیش‌فرض است و در ثبت روزانه برای هر نفر قابل تغییر است. ساعت کار موظف هر روز (مبنای اضافه‌کار) = ساعت شیفت منهای ناهار: شنبه تا چهارشنبه ۸ ساعت و پنجشنبه ۴ ساعت.</p>
+        <TimePair label="شنبه تا چهارشنبه" value={flat} onChange={set} a="wi" b="wo" />
+        <TimePair label="پنجشنبه" value={flat} onChange={set} a="ti" b="to" />
+        <TimePair label="صبحانه" value={flat} onChange={set} a="bs" b="be" />
+        <TimePair label="ناهار" value={flat} onChange={set} a="ls" b="le" />
+        <TimePair label="استراحت" value={flat} onChange={set} a="rs" b="re" />
+      </div>
+    </Sheet>
+  )
+}
+
+/* ---------- one employee, one day: operations ---------- */
 const newRow = (start = '') => ({ start, end: '', qty: '' })
 
-function WorkerDay({ worker, date, cat, isManager, onClose, onSaved }) {
+function WorkerDay({ worker, date, cat, showEff, onClose, onSaved }) {
   const toast = useToast()
   const [product, setProduct] = useState(null)
-  const [picked, setPicked] = useState([]) // stage ids in order
-  const [rowsBy, setRowsBy] = useState({}) // stageId -> {start,end,qty}
+  const [picked, setPicked] = useState([])
+  const [rowsBy, setRowsBy] = useState({})
   const [opQ, setOpQ] = useState('')
   const [busy, setBusy] = useState(false)
   const [edit, setEdit] = useState(null)
   const [delId, setDelId] = useState(null)
   const jobs = worker.jobs || []
   const lastEnd = jobs.reduce((m, j) => (j.end_time && t5(j.end_time) > m ? t5(j.end_time) : m), '')
-
   const products = cat.products.filter((p) => p.active || p.id === product)
   const stages = cat.stages.filter((s) => s.active && (!opQ || normalizeFa(s.name).includes(normalizeFa(opQ).trim())))
 
@@ -196,10 +295,8 @@ function WorkerDay({ worker, date, cat, isManager, onClose, onSaved }) {
     }
     setBusy(false)
     toast(`${fa(picked.length)} عملیات ثبت شد`)
-    setPicked([]); setRowsBy({})
-    onSaved()
+    setPicked([]); setRowsBy({}); onSaved()
   }
-
   const remove = async (id) => {
     const { error } = await supabase.rpc('delete_job', { p_id: id })
     if (error) return toast(errText(error), 'bad')
@@ -208,15 +305,12 @@ function WorkerDay({ worker, date, cat, isManager, onClose, onSaved }) {
 
   return (
     <Sheet open onClose={onClose} title={`${worker.full_name} — ${jDateLong(date)}`}
-      footer={picked.length > 0 && (
-        <Button className="btn-block btn-lg" icon="check" loading={busy} onClick={saveAll}>ثبت {fa(picked.length)} عملیات</Button>
-      )}>
-      {/* existing */}
+      footer={picked.length > 0 && <Button className="btn-block btn-lg" icon="check" loading={busy} onClick={saveAll}>ثبت {fa(picked.length)} عملیات</Button>}>
       {jobs.length > 0 && (
         <div className="jobs">
           <div className="sub-head">ثبت‌شده در این روز</div>
           {jobs.map((j) => {
-            const e = isManager && j.actual != null && j.std_seconds != null ? efficiency(Number(j.actual), Number(j.quantity) * Number(j.std_seconds)) : null
+            const e = showEff && j.actual != null && j.std_seconds != null ? efficiency(Number(j.actual), Number(j.quantity) * Number(j.std_seconds)) : null
             return (
               <div key={j.id} className="job" style={{ '--c': j.color }}>
                 <span className="job-bar" />
@@ -230,10 +324,7 @@ function WorkerDay({ worker, date, cat, isManager, onClose, onSaved }) {
                   </div>
                 </div>
                 {delId === j.id ? (
-                  <div className="job-confirm">
-                    <Button variant="danger" onClick={() => remove(j.id)}>حذف</Button>
-                    <Button variant="ghost" onClick={() => setDelId(null)}>نه</Button>
-                  </div>
+                  <div className="job-confirm"><Button variant="danger" onClick={() => remove(j.id)}>حذف</Button><Button variant="ghost" onClick={() => setDelId(null)}>نه</Button></div>
                 ) : (
                   <div className="job-actions">
                     <button className="icon-btn" aria-label="ویرایش" onClick={() => setEdit({ ...j, start: t5(j.start_time), end: t5(j.end_time), qty: String(Number(j.quantity)) })}><Icon name="edit" size={18} /></button>
@@ -246,12 +337,9 @@ function WorkerDay({ worker, date, cat, isManager, onClose, onSaved }) {
         </div>
       )}
 
-      {/* add new */}
       <div className="sub-head">{jobs.length ? 'افزودن عملیات جدید' : 'ثبت عملیات این روز'}</div>
       <div className="form">
-        <Field label="محصول">
-          <SearchSelect label="انتخاب محصول" items={products} value={product} onChange={setProduct} group="type" placeholder="محصول را انتخاب کنید" />
-        </Field>
+        <Field label="محصول"><SearchSelect label="انتخاب محصول" items={products} value={product} onChange={setProduct} group="type" placeholder="محصول را انتخاب کنید" /></Field>
         <Field label="عملیات‌های انجام‌شده (هر تعداد)">
           {cat.stages.length > 8 && <input className="input op-search" placeholder="جستجوی عملیات…" value={opQ} onChange={(e) => setOpQ(e.target.value)} />}
           <div className="op-chips">
@@ -279,7 +367,6 @@ function WorkerDay({ worker, date, cat, isManager, onClose, onSaved }) {
           )
         })}
       </div>
-
       {edit && <JobEditor job={edit} worker={worker} date={date} cat={cat} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); onSaved() }} />}
     </Sheet>
   )

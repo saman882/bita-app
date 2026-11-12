@@ -2,12 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, errText } from '../lib/supabase'
 import { fa, normalizeFa, toEn } from '../lib/fmt'
 import { Icon, Button, Sheet, Field, Empty, Spinner, useToast, SearchBox, NumInput } from '../components/ui'
+import { useAccess, can } from '../lib/access'
+import { money } from './SalesEntry'
 
 const COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6', '#f97316', '#64748b']
-const TABS = [['products', 'محصولات', 'box'], ['stages', 'عملیات‌ها', 'layers'], ['standards', 'زمان استاندارد', 'clock'], ['types', 'انواع محصول', 'tag']]
+const TABS = [['types', 'انواع محصول', 'tag'], ['products', 'محصولات', 'box'], ['stages', 'عملیات‌ها', 'layers'], ['standards', 'زمان استاندارد', 'clock']]
 
-export default function Catalog() {
+export default function Catalog({ onBack }) {
   const toast = useToast()
+  const access = useAccess()
+  const tabs = TABS.filter(([k]) => (k === 'standards' ? can(access, 'standards') : true))
   const [tab, setTab] = useState('products')
   const [d, setD] = useState(null)
 
@@ -27,9 +31,9 @@ export default function Catalog() {
 
   return (
     <div className="page">
-      <div className="page-title"><h1>محصولات و عملیات</h1></div>
+      <div className="page-title"><h1>محصولات و عملیات</h1>{onBack && <Button variant="ghost" icon="chev" onClick={onBack}>اطلاعات پایه</Button>}</div>
       <div className="tabs" role="tablist">
-        {TABS.map(([k, l, ic]) => (
+        {tabs.map(([k, l, ic]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon name={ic} size={16} />{l}</button>
         ))}
       </div>
@@ -75,7 +79,7 @@ function Products({ d, reload }) {
   }, [d.products, q, typeF])
 
   const save = async () => {
-    const row = { name: normalizeFa(edit.name).replace(/\s+/g, ' ').trim(), type_id: Number(edit.type_id), active: edit.active }
+    const row = { name: normalizeFa(edit.name).replace(/\s+/g, ' ').trim(), type_id: Number(edit.type_id), active: edit.active, price: Number(toEn(edit.price || 0)) || 0 }
     if (!row.name) return
     const ok = await run(() => edit.id ? supabase.from('products').update(row).eq('id', edit.id) : supabase.from('products').insert(row), edit.id ? 'محصول ذخیره شد' : 'محصول اضافه شد')
     if (ok) setEdit(null)
@@ -99,7 +103,7 @@ function Products({ d, reload }) {
               <span className="stage-swatch sm" style={{ background: 'var(--brand)' }} />
               <div className="grow">
                 <b>{p.name} {!p.active && <span className="badge badge-soft">غیرفعال</span>}</b>
-                <small className="muted">{typeName[p.type_id]}{d.used.products?.[p.id] ? ` · ${fa(d.used.products[p.id])} بار ثبت شده` : ''}</small>
+                <small className="muted">{typeName[p.type_id]}{Number(p.price) > 0 ? ` · ${money(p.price)}` : ''}{d.used.products?.[p.id] ? ` · ${fa(d.used.products[p.id])} بار ثبت شده` : ''}</small>
               </div>
               <Icon name="edit" size={18} className="muted" />
             </button>
@@ -113,7 +117,8 @@ function Products({ d, reload }) {
         {edit && (
           <div className="form">
             <Field label="نام محصول"><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="مثلاً شلنگ پکیج یکسرمغزی 1/2*1/2 50سانتی" autoFocus={!edit.id} /></Field>
-            <Field label="نوع محصول" hint="زمان استاندارد هر عملیات بر اساس نوع محصول تعیین می‌شود.">
+            <Field label="قیمت فروش هر عدد (تومان)" hint="در ثبت فروش به‌صورت پیش‌فرض پر می‌شود و قابل تغییر است."><NumInput value={String(edit.price ?? '')} onChange={(v) => setEdit({ ...edit, price: v })} placeholder="۰" /></Field>
+            <Field label="گروه (نوع) محصول" hint="زمان استاندارد هر عملیات بر اساس نوع محصول تعیین می‌شود.">
               <select className="input" value={edit.type_id} onChange={(e) => setEdit({ ...edit, type_id: e.target.value })}>
                 {d.types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
@@ -141,11 +146,15 @@ function Stages({ d, reload }) {
   const stdCount = (id) => d.standards.filter((x) => x.stage_id === id).length
 
   const save = async () => {
-    const row = { name: normalizeFa(edit.name).trim(), color: edit.color, sort_order: Number(toEn(edit.sort_order)) || 0, active: edit.active, unit: 'عدد' }
+    const row = { name: normalizeFa(edit.name).trim(), color: edit.color, sort_order: Number(toEn(edit.sort_order)) || 0, active: edit.active, unit: 'عدد', is_packaging: !!edit.is_packaging }
     if (!row.name) return
     if (await run(() => edit.id ? supabase.from('stages').update(row).eq('id', edit.id) : supabase.from('stages').insert(row), 'عملیات ذخیره شد')) setEdit(null)
   }
-  const del = async () => { if (await run(() => supabase.from('stages').delete().eq('id', edit.id), 'عملیات حذف شد')) setEdit(null) }
+  const [confirmDel, setConfirmDel] = useState(null)
+  const del = async () => {
+    const ok = await run(() => supabase.rpc('delete_stage', { p_id: confirmDel.id }), `عملیات «${confirmDel.name}» حذف شد`)
+    if (ok) setConfirmDel(null)
+  }
 
   return (
     <>
@@ -158,7 +167,7 @@ function Stages({ d, reload }) {
           <button key={s.id} className={`list-item as-btn ${s.active ? '' : 'is-off'}`} onClick={() => setEdit({ ...s, sort_order: String(s.sort_order) })}>
             <span className="stage-swatch" style={{ background: s.color }}><Icon name="layers" size={18} /></span>
             <div className="grow">
-              <b>{s.name} {!s.active && <span className="badge badge-soft">غیرفعال</span>}</b>
+              <b>{s.name} {s.is_packaging && <span className="badge badge-brand">بسته‌بندی</span>} {!s.active && <span className="badge badge-soft">غیرفعال</span>}</b>
               <small className="muted">{stdCount(s.id) ? `زمان استاندارد برای ${fa(stdCount(s.id))} نوع محصول` : 'زمان استاندارد تعریف نشده'}{d.used.stages?.[s.id] ? ` · ${fa(d.used.stages[s.id])} بار ثبت شده` : ''}</small>
             </div>
             <Icon name="edit" size={18} className="muted" />
@@ -167,11 +176,12 @@ function Stages({ d, reload }) {
       </div>
       <Sheet open={!!edit} onClose={() => setEdit(null)} title={edit?.id ? 'ویرایش عملیات' : 'عملیات جدید'}
         footer={<div className="row-gap">
-          {edit?.id && !d.used.stages?.[edit.id] && <Button variant="ghost-danger" icon="trash" loading={busy} onClick={del}>حذف</Button>}
+          {edit?.id && <Button variant="ghost-danger" icon="trash" onClick={() => { setConfirmDel(edit); setEdit(null) }}>حذف</Button>}
           <Button className="grow" icon="check" loading={busy} onClick={save}>ذخیره</Button></div>}>
         {edit && (
           <div className="form">
             <Field label="نام عملیات"><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="مثلاً برش" autoFocus={!edit.id} /></Field>
+            <label className="toggle"><input type="checkbox" checked={!!edit.is_packaging} onChange={(e) => setEdit({ ...edit, is_packaging: e.target.checked })} /><span>این عملیات «بسته‌بندی» است — آمار تولید کل از تعداد بسته‌بندی‌شده حساب می‌شود</span></label>
             <Field label="رنگ"><div className="swatches">{COLORS.map((c) => <button key={c} type="button" className={`swatch ${edit.color === c ? 'on' : ''}`} style={{ background: c }} onClick={() => setEdit({ ...edit, color: c })} aria-label={c} />)}</div></Field>
             <div className="grid2">
               <Field label="ترتیب نمایش"><NumInput value={edit.sort_order} onChange={(v) => setEdit({ ...edit, sort_order: v })} /></Field>
@@ -179,6 +189,14 @@ function Stages({ d, reload }) {
             </div>
             <p className="muted small">زمان استاندارد این عملیات را برای هر نوع محصول از زبانهٔ «زمان استاندارد» وارد کنید.</p>
           </div>
+        )}
+      </Sheet>
+      <Sheet open={!!confirmDel} onClose={() => setConfirmDel(null)} title="حذف عملیات"
+        footer={<div className="row-gap"><Button variant="ghost" onClick={() => setConfirmDel(null)}>انصراف</Button>
+          <Button variant="danger" className="grow" icon="trash" loading={busy} onClick={del}>حذف همیشگی</Button></div>}>
+        <p>عملیات «{confirmDel?.name}» و زمان‌های استاندارد آن حذف می‌شود.</p>
+        {confirmDel && d.used.stages?.[confirmDel.id] > 0 && (
+          <div className="banner banner-bad"><Icon name="alert" /><div><b>{fa(d.used.stages[confirmDel.id])} ثبت تولید</b> با این عملیات هم پاک می‌شود.<small>اگر فقط نمی‌خواهید دیگر انتخاب شود، به‌جای حذف آن را غیرفعال کنید.</small></div></div>
         )}
       </Sheet>
     </>

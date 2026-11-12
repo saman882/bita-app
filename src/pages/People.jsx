@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, errText, adminUsers, normPw, normUser } from '../lib/supabase'
-import { fa, shortTime, toEn, normalizeFa } from '../lib/fmt'
+import { PERMS, useAccess, can } from '../lib/access'
+import { fa, toEn, normalizeFa } from '../lib/fmt'
 import { Icon, Button, Sheet, Field, NumInput, Empty, useToast, SearchBox } from '../components/ui'
 
-export const ROLE = { manager: 'مدیر', admin: 'ادمین', supervisor: 'سرپرست' }
-
 /* =====================================================================
-   WORKERS (no login) — any staff can add/edit; only the manager deletes
+   کارکنان (no login) — add/edit with `staff`, delete with `staff_delete`
    ===================================================================== */
-const emptyWorker = { full_name: '', personnel_code: '', shift_start: '08:00', shift_end: '16:00', active: true }
+const emptyWorker = { full_name: '', personnel_code: '', active: true }
 
-export function Workers({ workers, reload, canDelete, me }) {
+export function Workers({ workers, reload, me, onBack }) {
   const toast = useToast()
+  const access = useAccess()
+  const canEdit = can(access, 'staff'), canDelete = can(access, 'staff_delete')
   const [q, setQ] = useState('')
   const [edit, setEdit] = useState(null)
   const [del, setDel] = useState(null)
@@ -19,11 +20,7 @@ export function Workers({ workers, reload, canDelete, me }) {
   const isNew = edit && !edit.id
 
   const save = async () => {
-    const row = {
-      full_name: normalizeFa(edit.full_name).trim(),
-      personnel_code: toEn(edit.personnel_code || '').trim() || null,
-      shift_start: edit.shift_start, shift_end: edit.shift_end, active: edit.active,
-    }
+    const row = { full_name: normalizeFa(edit.full_name).trim(), personnel_code: toEn(edit.personnel_code || '').trim() || null, active: edit.active }
     if (!row.full_name) return toast('نام را وارد کنید', 'bad')
     setBusy(true)
     const { error } = isNew ? await supabase.from('workers').insert({ ...row, created_by: me.id }) : await supabase.from('workers').update(row).eq('id', edit.id)
@@ -38,7 +35,6 @@ export function Workers({ workers, reload, canDelete, me }) {
     if (error) return toast(errText(error), 'bad')
     toast('حذف شد'); setDel(null); reload()
   }
-
   const list = useMemo(() => {
     const t = normalizeFa(q).trim()
     return [...workers].filter((w) => !t || normalizeFa(w.full_name).includes(t) || (w.personnel_code || '').includes(toEn(t)))
@@ -48,41 +44,41 @@ export function Workers({ workers, reload, canDelete, me }) {
   return (
     <div className="page">
       <div className="page-title">
-        <h1>نیروها</h1>
-        <Button icon="plus" onClick={() => setEdit({ ...emptyWorker })}>نیروی جدید</Button>
+        <h1>کارکنان</h1>
+        <div className="row-gap">
+          {onBack && <Button variant="ghost" icon="chev" onClick={onBack}>اطلاعات پایه</Button>}
+          {canEdit && <Button icon="plus" onClick={() => setEdit({ ...emptyWorker })}>همکار جدید</Button>}
+        </div>
       </div>
       <SearchBox value={q} onChange={setQ} placeholder="جستجوی نام یا کد پرسنلی…" />
-      {list.length === 0 ? <Empty icon="users" title={workers.length ? 'پیدا نشد' : 'هنوز نیرویی نیست'} /> : (
+      {list.length === 0 ? <Empty icon="users" title={workers.length ? 'پیدا نشد' : 'هنوز همکاری ثبت نشده'} /> : (
         <div className="list">
           {list.map((w) => (
-            <button key={w.id} className={`list-item as-btn ${w.active ? '' : 'is-off'}`}
-              onClick={() => setEdit({ ...w, personnel_code: w.personnel_code || '', shift_start: w.shift_start.slice(0, 5), shift_end: w.shift_end.slice(0, 5) })}>
+            <button key={w.id} className={`list-item as-btn ${w.active ? '' : 'is-off'}`} disabled={!canEdit}
+              onClick={() => setEdit({ ...w, personnel_code: w.personnel_code || '' })}>
               <div className="avatar">{w.full_name.trim()[0]}</div>
               <div className="grow">
                 <b>{w.full_name} {!w.active && <span className="badge badge-soft">غیرفعال</span>}</b>
-                <small className="muted">{w.personnel_code && <>کد {fa(w.personnel_code)} · </>}شیفت {shortTime(w.shift_start)}–{shortTime(w.shift_end)}</small>
+                <small className="muted">{w.personnel_code ? <>کد پرسنلی {fa(w.personnel_code)}</> : 'بدون کد پرسنلی'}</small>
               </div>
-              <Icon name="edit" size={18} className="muted" />
+              {canEdit && <Icon name="edit" size={18} className="muted" />}
             </button>
           ))}
         </div>
       )}
 
-      <Sheet open={!!edit} onClose={() => setEdit(null)} title={isNew ? 'نیروی جدید' : 'ویرایش نیرو'}
+      <Sheet open={!!edit} onClose={() => setEdit(null)} title={isNew ? 'همکار جدید' : 'ویرایش همکار'}
         footer={<div className="row-gap">
           {!isNew && canDelete && <Button variant="ghost-danger" icon="trash" onClick={() => { setDel(edit); setEdit(null) }}>حذف</Button>}
           <Button className="grow" icon="check" loading={busy} onClick={save}>{isNew ? 'افزودن' : 'ذخیره'}</Button>
         </div>}>
         {edit && (
           <div className="form">
-            <Field label="نام"><input className="input" value={edit.full_name} onChange={(e) => setEdit({ ...edit, full_name: e.target.value })} placeholder="مثلاً نظیری" autoFocus={isNew} /></Field>
+            <Field label="نام همکار"><input className="input" value={edit.full_name} onChange={(e) => setEdit({ ...edit, full_name: e.target.value })} placeholder="مثلاً نظیری" autoFocus={isNew} /></Field>
             <Field label="کد پرسنلی (اختیاری)"><NumInput value={edit.personnel_code} onChange={(v) => setEdit({ ...edit, personnel_code: v })} /></Field>
-            <div className="grid2">
-              <Field label="ساعت ورود مقرر"><input type="time" className="input" dir="ltr" value={edit.shift_start} onChange={(e) => setEdit({ ...edit, shift_start: e.target.value })} /></Field>
-              <Field label="ساعت خروج مقرر"><input type="time" className="input" dir="ltr" value={edit.shift_end} onChange={(e) => setEdit({ ...edit, shift_end: e.target.value })} /></Field>
-            </div>
+            <p className="muted small">ساعت ورود و خروج پیش‌فرض برای همهٔ کارکنان یکسان است و در «ثبت روزانه» قابل تغییر است.</p>
             {!isNew && (
-              <Field label="وضعیت" hint="نیروی غیرفعال در فهرست ثبت روزانه نمی‌آید؛ سوابقش می‌ماند.">
+              <Field label="وضعیت" hint="همکار غیرفعال در ثبت روزانه نمی‌آید؛ سوابقش می‌ماند.">
                 <select className="input" value={edit.active ? '1' : '0'} onChange={(e) => setEdit({ ...edit, active: e.target.value === '1' })}>
                   <option value="1">فعال</option><option value="0">غیرفعال</option>
                 </select>
@@ -92,13 +88,11 @@ export function Workers({ workers, reload, canDelete, me }) {
         )}
       </Sheet>
 
-      <Sheet open={!!del} onClose={() => setDel(null)} title="حذف نیرو"
-        footer={<div className="row-gap">
-          <Button variant="ghost" onClick={() => setDel(null)}>انصراف</Button>
-          <Button variant="danger" className="grow" icon="trash" loading={busy} onClick={remove}>حذف همیشگی</Button>
-        </div>}>
+      <Sheet open={!!del} onClose={() => setDel(null)} title="حذف همکار"
+        footer={<div className="row-gap"><Button variant="ghost" onClick={() => setDel(null)}>انصراف</Button>
+          <Button variant="danger" className="grow" icon="trash" loading={busy} onClick={remove}>حذف همیشگی</Button></div>}>
         <div className="banner banner-bad"><Icon name="alert" />
-          <div>با حذف «{del?.full_name}» <b>همهٔ سوابق حضور و عملیات او هم پاک می‌شود</b>.<small>اگر دیگر کار نمی‌کند، به‌جای حذف «غیرفعال» کنید.</small></div>
+          <div>با حذف «{del?.full_name}» <b>همهٔ سوابق حضور و تولید او هم پاک می‌شود</b>.<small>اگر دیگر کار نمی‌کند، به‌جای حذف «غیرفعال» کنید.</small></div>
         </div>
       </Sheet>
     </div>
@@ -106,85 +100,169 @@ export function Workers({ workers, reload, canDelete, me }) {
 }
 
 /* =====================================================================
-   ACCOUNTS (manager only)
+   حساب‌های کاربری و نقش‌ها
    ===================================================================== */
-export function Users({ me }) {
+function PermTable({ value, onChange, disabled }) {
+  const groups = [...new Set(PERMS.map((p) => p.group))]
+  const toggle = (k) => onChange(value.includes(k) ? value.filter((x) => x !== k) : [...value, k])
+  return (
+    <div className="perm-table">
+      {groups.map((g) => (
+        <div key={g} className="perm-group">
+          <div className="perm-group-head">{g}</div>
+          {PERMS.filter((p) => p.group === g).map((p) => (
+            <label key={p.key} className={`perm-row ${value.includes(p.key) ? 'on' : ''}`}>
+              <span>{p.label}</span>
+              <input type="checkbox" className="switch" checked={disabled || value.includes(p.key)} disabled={disabled} onChange={() => toggle(p.key)} />
+            </label>
+          ))}
+        </div>
+      ))}
+      {!disabled && (
+        <div className="perm-quick">
+          <button type="button" className="link-btn" onClick={() => onChange(PERMS.map((p) => p.key))}>انتخاب همه</button>
+          <button type="button" className="link-btn" onClick={() => onChange([])}>هیچ‌کدام</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function Users({ me, onMeChanged }) {
   const toast = useToast()
   const [list, setList] = useState([])
+  const [roles, setRoles] = useState([])
   const [edit, setEdit] = useState(null)
   const [pw, setPw] = useState(null)
   const [newPw, setNewPw] = useState('')
   const [del, setDel] = useState(null)
+  const [roleEdit, setRoleEdit] = useState(null)
   const [busy, setBusy] = useState(false)
   const isNew = edit && !edit.id
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase.from('profiles').select('*')
-    if (error) toast(errText(error), 'bad')
-    const order = { manager: 0, admin: 1, supervisor: 2 }
-    setList((data || []).sort((a, b) => order[a.role] - order[b.role]))
+    const [p, r] = await Promise.all([supabase.from('profiles').select('*'), supabase.from('roles').select('*').order('sort_order').order('id')])
+    if (p.error || r.error) toast(errText(p.error || r.error), 'bad')
+    setRoles(r.data || [])
+    const order = Object.fromEntries((r.data || []).map((x, i) => [x.id, i]))
+    setList((p.data || []).sort((a, b) => order[a.role_id] - order[b.role_id]))
   }, [toast])
   useEffect(() => { load() }, [load])
+  const roleOf = (id) => roles.find((r) => r.id === id)
 
   const run = async (fn, ok, after) => {
     setBusy(true)
-    try { await fn(); toast(ok); after?.(); load() } catch (e) { toast(errText(e), 'bad') } finally { setBusy(false) }
+    try { await fn(); toast(ok); after?.(); load(); if (edit?.id === me.id) onMeChanged?.() } catch (e) { toast(errText(e), 'bad') } finally { setBusy(false) }
+  }
+  const pickRole = (id) => {
+    const r = roleOf(Number(id))
+    setEdit((e) => ({ ...e, role_id: Number(id), perms: r?.perms || [] }))
   }
   const save = () => {
     const full_name = normalizeFa(edit.full_name).trim()
     if (!full_name) return toast('نام را وارد کنید', 'bad')
-    if (isNew) return run(() => adminUsers({ action: 'create', full_name, username: normUser(edit.username), password: normPw(edit.password), role: edit.role }), 'حساب ساخته شد', () => setEdit(null))
-    return run(() => adminUsers({ action: 'update', id: edit.id, full_name, username: normUser(edit.username), role: edit.role, active: edit.active }), 'ذخیره شد', () => setEdit(null))
+    if (!edit.role_id) return toast('نقش را انتخاب کنید', 'bad')
+    const body = { full_name, username: normUser(edit.username), role_id: edit.role_id, perms: edit.perms }
+    if (isNew) return run(() => adminUsers({ action: 'create', ...body, password: normPw(edit.password) }), 'حساب ساخته شد', () => setEdit(null))
+    return run(() => adminUsers({ action: 'update', id: edit.id, ...body, active: edit.active }), 'ذخیره شد', () => setEdit(null))
   }
+
+  const saveRole = async () => {
+    const name = normalizeFa(roleEdit.name).trim()
+    if (!name) return toast('نام نقش را وارد کنید', 'bad')
+    setBusy(true)
+    const row = { name, perms: roleEdit.perms, sort_order: roleEdit.sort_order ?? roles.length + 1 }
+    const { error } = roleEdit.id ? await supabase.from('roles').update(row).eq('id', roleEdit.id) : await supabase.from('roles').insert(row)
+    setBusy(false)
+    if (error) return toast(/duplicate|unique/i.test(error.message) ? 'نقشی با این نام وجود دارد' : errText(error), 'bad')
+    toast('نقش ذخیره شد'); setRoleEdit(null); load()
+  }
+  const deleteRole = async () => {
+    if (list.some((u) => u.role_id === roleEdit.id)) return toast('این نقش به حسابی داده شده؛ اول نقش آن حساب‌ها را عوض کنید', 'bad')
+    setBusy(true)
+    const { error } = await supabase.from('roles').delete().eq('id', roleEdit.id)
+    setBusy(false)
+    if (error) return toast(errText(error), 'bad')
+    toast('نقش حذف شد'); setRoleEdit(null); load()
+  }
+
+  const permCount = (u) => (roleOf(u.role_id)?.is_manager ? 'همهٔ دسترسی‌ها' : `${fa((u.perms || []).length)} دسترسی`)
 
   return (
     <div className="page">
       <div className="page-title">
         <h1>حساب‌های کاربری</h1>
-        <Button variant="ghost" icon="plus" onClick={() => setEdit({ full_name: '', username: '', password: '', role: 'supervisor', active: true })}>حساب جدید</Button>
+        <Button icon="plus" onClick={() => { const r = roles.find((x) => !x.is_manager); setEdit({ full_name: '', username: '', password: '', role_id: r?.id, perms: r?.perms || [], active: true }) }}>حساب جدید</Button>
       </div>
-      <div className="card role-help">
-        <div><b>مدیر</b><span>دسترسی کامل: گزارش‌ها، ثبت، محصولات و عملیات، زمان استاندارد، حساب‌ها</span></div>
-        <div><b>ادمین</b><span>ثبت روزانه + تعریف و ویرایش محصولات، عملیات و زمان استاندارد. گزارش نمی‌بیند.</span></div>
-        <div><b>سرپرست</b><span>ثبت ورود و خروج، عملیات و تولید نیروها؛ تعریف نیرو. زمان استاندارد و گزارش نمی‌بیند.</span></div>
-        <small className="muted">نام کاربری به حروف بزرگ و کوچک حساس نیست؛ رمز عبور حساس است.</small>
-      </div>
+      <p className="muted small intro">نام کاربری به حروف بزرگ و کوچک حساس نیست؛ رمز عبور حساس است.</p>
       <div className="list">
         {list.map((u) => (
           <div key={u.id} className={`list-item ${u.active ? '' : 'is-off'}`}>
             <div className="avatar">{u.full_name.trim()[0]}</div>
             <div className="grow">
-              <b>{u.full_name} <span className={`badge ${u.role === 'manager' ? 'badge-brand' : 'badge-soft'}`}>{ROLE[u.role]}</span>{u.id === me.id && <span className="badge badge-good">شما</span>} {!u.active && <span className="badge badge-bad">غیرفعال</span>}</b>
-              <small className="muted" dir="ltr">{u.username}</small>
+              <b>{u.full_name} <span className={`badge ${roleOf(u.role_id)?.is_manager ? 'badge-brand' : 'badge-soft'}`}>{roleOf(u.role_id)?.name}</span>{u.id === me.id && <span className="badge badge-good">شما</span>} {!u.active && <span className="badge badge-bad">غیرفعال</span>}</b>
+              <small className="muted"><span dir="ltr">{u.username}</span> · {permCount(u)}</small>
             </div>
             <button className="icon-btn" aria-label="تغییر رمز" title="تغییر رمز" onClick={() => { setNewPw(''); setPw(u) }}><Icon name="key" size={18} /></button>
-            <button className="icon-btn" aria-label="ویرایش" title="ویرایش" onClick={() => setEdit({ ...u })}><Icon name="edit" size={18} /></button>
+            <button className="icon-btn" aria-label="ویرایش" title="ویرایش" onClick={() => setEdit({ ...u, perms: u.perms || [] })}><Icon name="edit" size={18} /></button>
           </div>
         ))}
       </div>
 
-      <Sheet open={!!edit} onClose={() => setEdit(null)} title={isNew ? 'حساب جدید' : 'ویرایش حساب'}
+      <section className="card">
+        <div className="card-head"><h2>نقش‌ها</h2><Button variant="ghost" icon="plus" onClick={() => setRoleEdit({ name: '', perms: [] })}>نقش جدید</Button></div>
+        <p className="muted small">نقش یک الگوی آماده از دسترسی‌هاست (مثلاً منشی، انباردار). هنگام ساخت حساب با انتخاب نقش، دسترسی‌هایش خودکار تیک می‌خورد و می‌توانید برای آن شخص کم و زیادشان کنید.</p>
+        <div className="list">
+          {roles.map((r) => (
+            <button key={r.id} className="list-item as-btn" disabled={r.is_manager} onClick={() => setRoleEdit({ ...r })}>
+              <span className="stage-swatch" style={{ background: r.is_manager ? 'var(--brand)' : 'var(--brand-2)' }}><Icon name="key" size={18} /></span>
+              <div className="grow"><b>{r.name}</b><small className="muted">{r.is_manager ? 'دسترسی کامل — قابل تغییر نیست' : `${fa(r.perms.length)} دسترسی`} · {fa(list.filter((u) => u.role_id === r.id).length)} حساب</small></div>
+              {!r.is_manager && <Icon name="edit" size={18} className="muted" />}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <Sheet open={!!edit} onClose={() => setEdit(null)} title={isNew ? 'حساب جدید' : `ویرایش حساب ${edit?.full_name ?? ''}`}
         footer={<div className="row-gap">
           {!isNew && edit?.id !== me.id && <Button variant="ghost-danger" icon="trash" onClick={() => { setDel(edit); setEdit(null) }}>حذف</Button>}
-          <Button className="grow" icon="check" loading={busy} onClick={save}>{isNew ? 'ساخت' : 'ذخیره'}</Button>
+          <Button className="grow" icon="check" loading={busy} onClick={save}>{isNew ? 'ساخت حساب' : 'ذخیره'}</Button>
         </div>}>
         {edit && (
           <div className="form">
-            <Field label="نام نمایشی"><input className="input" value={edit.full_name} onChange={(e) => setEdit({ ...edit, full_name: e.target.value })} /></Field>
-            <Field label="نام کاربری" hint="حروف انگلیسی، عدد، _ . -">
-              <input className="input" dir="ltr" autoCapitalize="none" autoComplete="off" value={edit.username} onChange={(e) => setEdit({ ...edit, username: e.target.value })} />
-            </Field>
+            <div className="grid2">
+              <Field label="نام نمایشی"><input className="input" value={edit.full_name} onChange={(e) => setEdit({ ...edit, full_name: e.target.value })} /></Field>
+              <Field label="نام کاربری"><input className="input" dir="ltr" autoCapitalize="none" autoComplete="off" value={edit.username} onChange={(e) => setEdit({ ...edit, username: e.target.value })} /></Field>
+            </div>
             {isNew && <Field label="رمز عبور" hint="حداقل ۶ کاراکتر؛ به حروف بزرگ و کوچک حساس است">
               <input className="input" dir="ltr" autoCapitalize="none" autoComplete="new-password" value={edit.password} onChange={(e) => setEdit({ ...edit, password: e.target.value })} />
             </Field>}
-            {edit.id !== me.id && (
-              <div className="grid2">
-                <Field label="نقش"><select className="input" value={edit.role} onChange={(e) => setEdit({ ...edit, role: e.target.value })}>
-                  <option value="supervisor">سرپرست</option><option value="admin">ادمین</option><option value="manager">مدیر</option></select></Field>
-                {!isNew && <Field label="وضعیت"><select className="input" value={edit.active ? '1' : '0'} onChange={(e) => setEdit({ ...edit, active: e.target.value === '1' })}>
-                  <option value="1">فعال</option><option value="0">غیرفعال</option></select></Field>}
-              </div>
-            )}
+            <div className="grid2">
+              <Field label="نقش">
+                <select className="input" value={edit.role_id || ''} onChange={(e) => pickRole(e.target.value)} disabled={edit.id === me.id}>
+                  {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              </Field>
+              {!isNew && edit.id !== me.id && <Field label="وضعیت"><select className="input" value={edit.active ? '1' : '0'} onChange={(e) => setEdit({ ...edit, active: e.target.value === '1' })}>
+                <option value="1">فعال</option><option value="0">غیرفعال</option></select></Field>}
+            </div>
+            <Field label="دسترسی‌های این حساب" hint={roleOf(edit.role_id)?.is_manager ? 'نقش مدیر همهٔ دسترسی‌ها را دارد.' : 'با انتخاب نقش، دسترسی‌های آن تیک می‌خورد؛ می‌توانید برای این شخص تغییرشان دهید.'}>
+              <PermTable value={edit.perms} onChange={(perms) => setEdit({ ...edit, perms })} disabled={!!roleOf(edit.role_id)?.is_manager} />
+            </Field>
+          </div>
+        )}
+      </Sheet>
+
+      <Sheet open={!!roleEdit} onClose={() => setRoleEdit(null)} title={roleEdit?.id ? 'ویرایش نقش' : 'نقش جدید'}
+        footer={<div className="row-gap">
+          {roleEdit?.id && <Button variant="ghost-danger" icon="trash" loading={busy} onClick={deleteRole}>حذف</Button>}
+          <Button className="grow" icon="check" loading={busy} onClick={saveRole}>ذخیره</Button></div>}>
+        {roleEdit && (
+          <div className="form">
+            <Field label="نام نقش"><input className="input" value={roleEdit.name} onChange={(e) => setRoleEdit({ ...roleEdit, name: e.target.value })} placeholder="مثلاً منشی" autoFocus={!roleEdit.id} /></Field>
+            <Field label="دسترسی‌های پیش‌فرض این نقش" hint="تغییر این الگو روی حساب‌های موجود اثر ندارد؛ برای آن‌ها از ویرایش حساب استفاده کنید.">
+              <PermTable value={roleEdit.perms} onChange={(perms) => setRoleEdit({ ...roleEdit, perms })} />
+            </Field>
           </div>
         )}
       </Sheet>

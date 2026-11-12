@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  ResponsiveContainer, LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, Legend, LabelList,
+  ResponsiveContainer, LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, LabelList,
 } from 'recharts'
 import { supabase, errText } from '../lib/supabase'
-import { analyze, trend, efficiency, perUnit } from '../lib/calc'
-import { fa, num, pct, hms, jDate, jDateLong, tehranIso, addDays, weekStart, monthStart, jParts, MONTHS, inDiffLabel } from '../lib/fmt'
+import { analyze, efficiency } from '../lib/calc'
+import { useAccess, can } from '../lib/access'
+import { useWorkHours, dayMetrics } from '../lib/hours'
+import { fa, num, pct, jDate, jDateLong, tehranIso, addDays, weekStart, monthStart, jParts, MONTHS } from '../lib/fmt'
 import { Icon, Kpi, Empty, Spinner, JDateInput, useToast, effTone, Button, SearchSelect } from '../components/ui'
+import { money } from './SalesEntry'
 
-const PRESETS = [
-  ['today', 'امروز'], ['week', 'این هفته'], ['month', 'این ماه'], ['lastmonth', 'ماه قبل'], ['90', '۳ ماه اخیر'], ['year', 'امسال'],
-]
+/* ---------------- helpers ---------------- */
+const PRESETS = [['today', 'امروز'], ['week', 'این هفته'], ['month', 'این ماه'], ['lastmonth', 'ماه قبل'], ['90', '۳ ماه اخیر'], ['year', 'امسال']]
 function presetRange(id) {
   const t = tehranIso()
   switch (id) {
@@ -22,285 +24,74 @@ function presetRange(id) {
     default: return [t, t]
   }
 }
+const jIso = (iso) => { const { jy, jm, jd } = jParts(iso); return `${jy}/${String(jm).padStart(2, '0')}/${String(jd).padStart(2, '0')}` }
+const bucketOf = (iso, mode) => (mode === 'week' ? weekStart(iso) : mode === 'month' ? monthStart(iso) : iso)
 const bucketLabel = (iso, mode) => {
   const { jy, jm, jd } = jParts(iso)
   if (mode === 'month') return `${MONTHS[jm - 1]} ${fa(String(jy).slice(2))}`
   return mode === 'week' ? `هفتهٔ ${fa(jd)}/${fa(jm)}` : `${fa(jd)}/${fa(jm)}`
 }
-const pc = (r) => (r == null ? 0 : Math.round(r * 1000) / 10)
-const jIso = (iso) => { const { jy, jm, jd } = jParts(iso); return `${jy}/${String(jm).padStart(2, '0')}/${String(jd).padStart(2, '0')}` }
+const pc = (r) => (r == null ? null : Math.round(r * 1000) / 10)
+const hm = (min) => { if (min == null) return '—'; const m = Math.round(min); return fa(`${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`) }
+const hrs = (min) => Math.round((min / 60) * 100) / 100
+const EFF_COLOR = (v) => (v == null ? 'var(--muted)' : v >= 95 ? 'var(--good)' : v >= 80 ? 'var(--warn)' : 'var(--bad)')
 const PALETTE = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6', '#f97316', '#64748b']
 
-export default function Reports({ workers = [] }) {
-  const toast = useToast()
-  const [preset, setPreset] = useState('90')
-  const [[from, to], setRange] = useState(presetRange('90'))
-  const [who, setWho] = useState(null)
-  const [stage, setStage] = useState(null)
-  const [product, setProduct] = useState(null)
-  const [cat, setCat] = useState({ stages: [], products: [] })
-  const [data, setData] = useState(null)
-  const [mode, setMode] = useState('day')
-  const [chart, setChart] = useState('line')
-  const [metric, setMetric] = useState('eff')
-  const [split, setSplit] = useState(null)
-  const [openDay, setOpenDay] = useState(null)
-  const [exporting, setExporting] = useState(false)
-
-  useEffect(() => {
-    Promise.all([
-      supabase.from('stages').select('id, name, color').order('sort_order'),
-      supabase.from('products').select('id, name, product_types(name, sort_order)').order('name'),
-    ]).then(([s, p]) => setCat({
-      stages: s.data || [],
-      products: (p.data || []).map((x) => ({ id: x.id, name: x.name, type: x.product_types?.name, o: x.product_types?.sort_order ?? 0 }))
-        .sort((a, b) => a.o - b.o || a.name.localeCompare(b.name, 'fa')),
-    }))
-  }, [])
-
-  useEffect(() => {
-    let alive = true
-    setData(null)
-    ;(async () => {
-      let qj = supabase.from('v_jobs').select('*').gte('work_date', from).lte('work_date', to).order('work_date').order('start_time', { nullsFirst: false })
-      let qa = supabase.from('v_attendance').select('*').gte('work_date', from).lte('work_date', to)
-      if (who) { qj = qj.eq('worker_id', who); qa = qa.eq('worker_id', who) }
-      if (stage) qj = qj.eq('stage_id', stage)
-      if (product) qj = qj.eq('product_id', product)
-      const [j, a] = await Promise.all([qj.limit(50000), qa.limit(50000)])
-      if (!alive) return
-      if (j.error || a.error) { toast(errText(j.error || a.error), 'bad'); setData({ jobs: [], att: [] }); return }
-      // presence is not split by operation/product, so attendance is only used without those filters
-      setData({ jobs: j.data, att: stage || product ? [] : a.data })
-    })()
-    return () => { alive = false }
-  }, [from, to, who, stage, product, toast])
-
-  const nameOf = useMemo(() => Object.fromEntries(workers.map((w) => [w.id, w.full_name])), [workers])
-  const att = useMemo(() => (data?.att || []).map((a) => ({ ...a, worker_name: nameOf[a.worker_id] })), [data, nameOf])
-  const res = useMemo(() => (data ? analyze(data.jobs, att) : null), [data, att])
-  const splitItems = useMemo(() => (!res || !split ? [] : split === 'stage' ? res.stages : res.workers), [res, split])
-  const series = useMemo(() => (data ? trend(data.jobs, att, mode, split) : []), [data, att, mode, split])
-  const colorOf = (it, i) => it.color || PALETTE[i % PALETTE.length]
-
-  const pick = (id) => { setPreset(id); setRange(presetRange(id)) }
-  const t = res?.total
-  const empty = data && data.jobs.length + data.att.length === 0
-
-  // fetch the Excel library in the background so the button works instantly, even on slow connections
-  useEffect(() => { const id = setTimeout(() => { loadXlsx().catch(() => {}) }, 1500); return () => clearTimeout(id) }, [])
-
-  const exportXlsx = async () => {
-    setExporting(true)
-    try {
-      const how = await buildWorkbook({ data, res, att, from, to, nameOf })
-      toast(how === 'share' ? 'فایل اکسل آماده شد؛ از منوی اشتراک «Save to Files» را بزنید' : how === 'tab' ? 'فایل در صفحهٔ جدید باز شد' : 'فایل اکسل دانلود شد')
-    } catch (e) {
-      if (e?.name === 'AbortError') return
-      toast(/fetch|import|module|Load failed/i.test(e?.message || '') ? 'دریافت ابزار اکسل از سرور ناموفق بود؛ اینترنت را بررسی و صفحه را تازه کنید' : errText(e), 'bad')
-    } finally { setExporting(false) }
+/** One-sheet Excel export of a report section. rows: array of arrays (first = header). */
+async function exportSheet(title, rows, range) {
+  const XLSX = await import('xlsx')
+  const ws = XLSX.utils.aoa_to_sheet([[title], [`از ${jIso(range[0])} تا ${jIso(range[1])}`], [], ...rows])
+  ws['!cols'] = rows[0].map((_, i) => ({ wch: Math.min(48, Math.max(10, ...rows.map((r) => String(r[i] ?? '').length + 2))) }))
+  const book = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(book, ws, title.slice(0, 30).replace(/[\\/?*[\]:]/g, ' '))
+  book.Workbook = { Views: [{ RTL: true }] }
+  const bytes = XLSX.write(book, { bookType: 'xlsx', type: 'array', compression: true })
+  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const name = `${title} ${jIso(range[0]).replace(/\//g, '-')} تا ${jIso(range[1]).replace(/\//g, '-')}.xlsx`
+  const ua = navigator.userAgent
+  const ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  const standalone = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone
+  if (ios || standalone || /Telegram|Instagram|WhatsApp|; wv\)/i.test(ua)) {
+    const file = new File([blob], name, { type: blob.type })
+    if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: name }); return }
   }
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
+}
 
-  const effBar = (v) => (v >= 95 ? 'var(--good)' : v >= 80 ? 'var(--warn)' : 'var(--bad)')
-
+function Section({ title, sub, rows, range, children, actions }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const go = async () => {
+    setBusy(true)
+    try { await exportSheet(title, rows(), range) } catch (e) { if (e?.name !== 'AbortError') toast(/import|fetch|module/i.test(e?.message || '') ? 'دریافت ابزار اکسل ناموفق بود؛ صفحه را تازه کنید' : errText(e), 'bad') } finally { setBusy(false) }
+  }
   return (
-    <div className="page">
-      <div className="page-title">
-        <h1>گزارش‌ها</h1>
-        {data && !empty && <Button variant="success" icon="download" loading={exporting} onClick={exportXlsx}>خروجی اکسل</Button>}
+    <section className="card">
+      <div className="card-head">
+        <div><h2>{title}</h2>{sub && <small className="muted">{sub}</small>}</div>
+        <div className="row-gap">{actions}{rows && <Button variant="ghost" icon="download" loading={busy} onClick={go} className="btn-xl">اکسل</Button>}</div>
       </div>
-
-      <div className="card filters">
-        <div className="chips">{PRESETS.map(([k, l]) => <button key={k} className={`chip ${preset === k ? 'on' : ''}`} onClick={() => pick(k)}>{l}</button>)}</div>
-        <div className="range">
-          <div><span className="muted small">از</span><JDateInput value={from} onChange={(v) => { setPreset(null); setRange([v, v > to ? v : to]) }} label="از تاریخ" /></div>
-          <div><span className="muted small">تا</span><JDateInput value={to} onChange={(v) => { setPreset(null); setRange([v < from ? v : from, v]) }} label="تا تاریخ" /></div>
-        </div>
-        <div className="grid3 filters-3">
-          <SearchSelect label="نیرو" items={workers.map((w) => ({ id: w.id, name: w.full_name }))} value={who} onChange={setWho} allLabel="همهٔ نیروها" />
-          <SearchSelect label="عملیات" items={cat.stages} value={stage} onChange={setStage} allLabel="همهٔ عملیات‌ها" />
-          <SearchSelect label="محصول" items={cat.products} value={product} onChange={setProduct} allLabel="همهٔ محصولات" group="type" />
-        </div>
-        {(who || stage || product) && <button className="link-btn" onClick={() => { setWho(null); setStage(null); setProduct(null) }}>حذف فیلترها</button>}
-      </div>
-
-      {!data ? <div className="page-center"><Spinner size={28} /></div> : empty ? (
-        <Empty icon="chart" title="در این بازه اطلاعاتی نیست" text={`${jDate(from)} تا ${jDate(to)}`} />
-      ) : (
-        <>
-          <div className="kpis">
-            <Kpi icon="target" label="بهره‌وری کل" value={pct(t.eff)} tone={effTone(t.eff)} sub="استاندارد ÷ صرف‌شده" />
-            <Kpi icon="box" label="حجم تولید" value={num(t.qty)} sub={`${fa(t.count)} عملیات در ${fa(t.days)} روز`} />
-            <Kpi icon="clock" label="زمان صرف‌شده" value={hms(t.actual)} sub={`استاندارد ${hms(t.standard)}`} />
-            <Kpi icon="bolt" label="کارکرد مؤثر" value={pct(t.effective)} sub={t.presence ? `حضور ${hms(t.presence)}` : 'ساعت حضور ثبت نشده'} />
-            {t.untimed > 0 && <Kpi icon="alert" label="عملیات بدون ساعت" value={fa(t.untimed)} tone="warn" sub="در بهره‌وری حساب نمی‌شوند" />}
-            {t.lateDays > 0 && <Kpi icon="alert" label="تأخیر ورود" value={hms(t.late)} tone="bad" sub={`${fa(t.lateDays)} مورد`} />}
-          </div>
-
-          {/* ---------- trend ---------- */}
-          <section className="card">
-            <div className="card-head">
-              <h2>روند {metric === 'eff' ? 'بهره‌وری' : 'تولید'}</h2>
-              <div className="seg">{[['day', 'روزانه'], ['week', 'هفتگی'], ['month', 'ماهانه']].map(([k, l]) => <button key={k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{l}</button>)}</div>
-            </div>
-            <div className="chart-opts">
-              <div className="seg sm">{[['eff', 'بهره‌وری'], ['qty', 'تولید']].map(([k, l]) => <button key={k} className={metric === k ? 'on' : ''} onClick={() => { setMetric(k); if (k === 'qty') setSplit(null) }}>{l}</button>)}</div>
-              <div className="seg sm">{[['line', 'خطی'], ['bar', 'میله‌ای']].map(([k, l]) => <button key={k} className={chart === k ? 'on' : ''} onClick={() => setChart(k)}>{l}</button>)}</div>
-              {metric === 'eff' && <div className="seg sm">{[[null, 'کل'], ['stage', 'هر عملیات'], ['worker', 'هر نیرو']].map(([k, l]) => <button key={l} className={split === k ? 'on' : ''} onClick={() => setSplit(k)}>{l}</button>)}</div>}
-            </div>
-            <div className="chart" dir="ltr">
-              <ResponsiveContainer width="100%" height={300}>
-                {chart === 'line' ? (
-                  <LineChart data={series} margin={{ top: 10, right: 8, left: -6, bottom: 0 }}>
-                    <CartesianGrid stroke="var(--line)" vertical={false} />
-                    <XAxis dataKey="key" tickFormatter={(k) => bucketLabel(k, mode)} tick={{ fontSize: 11, fill: 'var(--muted)' }} reversed axisLine={false} tickLine={false} minTickGap={10} />
-                    <YAxis orientation="right" tickFormatter={(v) => fa(v) + (metric === 'eff' ? '٪' : '')} tick={{ fontSize: 11, fill: 'var(--muted)' }} axisLine={false} tickLine={false} width={48} />
-                    {metric === 'eff' && <ReferenceLine y={100} stroke="var(--good)" strokeDasharray="4 4" />}
-                    <Tooltip content={<Tip mode={mode} unit={metric === 'eff' ? '٪' : ''} />} />
-                    {metric === 'qty' ? <Line type="monotone" dataKey="qty" name="تولید" stroke="var(--accent)" strokeWidth={3} dot={series.length < 35} />
-                      : split ? splitItems.map((it, i) => <Line key={it.key} type="monotone" dataKey={`p${it.key}`} name={it.name} stroke={colorOf(it, i)} strokeWidth={2.2} dot={false} connectNulls />)
-                      : <Line type="monotone" dataKey="eff" name="بهره‌وری" stroke="var(--brand)" strokeWidth={3} dot={series.length < 35} connectNulls />}
-                    {split && <Legend wrapperStyle={{ fontSize: 12, direction: 'rtl' }} iconType="circle" />}
-                  </LineChart>
-                ) : (
-                  <BarChart data={series} margin={{ top: 10, right: 8, left: -6, bottom: 0 }}>
-                    <CartesianGrid stroke="var(--line)" vertical={false} />
-                    <XAxis dataKey="key" tickFormatter={(k) => bucketLabel(k, mode)} tick={{ fontSize: 11, fill: 'var(--muted)' }} reversed axisLine={false} tickLine={false} minTickGap={6} />
-                    <YAxis orientation="right" tickFormatter={(v) => fa(v) + (metric === 'eff' ? '٪' : '')} tick={{ fontSize: 11, fill: 'var(--muted)' }} axisLine={false} tickLine={false} width={48} />
-                    {metric === 'eff' && <ReferenceLine y={100} stroke="var(--good)" strokeDasharray="4 4" />}
-                    <Tooltip content={<Tip mode={mode} unit={metric === 'eff' ? '٪' : ''} />} cursor={{ fill: 'var(--soft)' }} />
-                    {metric === 'qty' ? <Bar dataKey="qty" name="تولید" fill="var(--accent)" radius={[6, 6, 0, 0]} />
-                      : split ? splitItems.map((it, i) => <Bar key={it.key} dataKey={`p${it.key}`} name={it.name} fill={colorOf(it, i)} radius={[4, 4, 0, 0]} />)
-                      : <Bar dataKey="eff" name="بهره‌وری" radius={[6, 6, 0, 0]}>{series.map((r) => <Cell key={r.key} fill={effBar(r.eff)} />)}</Bar>}
-                    {split && <Legend wrapperStyle={{ fontSize: 12, direction: 'rtl' }} iconType="circle" />}
-                  </BarChart>
-                )}
-              </ResponsiveContainer>
-            </div>
-          </section>
-
-          {/* ---------- by operation ---------- */}
-          <section className="card">
-            <div className="card-head"><h2>به تفکیک عملیات (مرحله)</h2></div>
-            <HBars rows={res.stages.filter((s) => s.eff != null).map((s) => ({ name: s.name, v: pc(s.eff), c: s.color }))} unit="٪" />
-            <div className="table-wrap"><table className="table">
-              <thead><tr><th>عملیات</th><th>تولید</th><th>زمان صرف‌شده</th><th>زمان استاندارد</th><th>زمان واقعی یک عدد</th><th>بهره‌وری</th></tr></thead>
-              <tbody>
-                {res.stages.map((s) => <tr key={s.key}>
-                  <td><span className="dot" style={{ background: s.color }} />{s.name}</td><td>{num(s.qty)}</td>
-                  <td className="mono">{hms(s.actual)}</td><td className="mono">{hms(s.standard)}</td>
-                  <td>{s.unit == null ? '—' : `${num(s.unit)} ثانیه`}</td>
-                  <td><span className={`badge badge-${effTone(s.eff)}`}>{pct(s.eff)}</span></td></tr>)}
-                <tr className="total"><td>جمع کل</td><td>{num(t.qty)}</td><td className="mono">{hms(t.actual)}</td><td className="mono">{hms(t.standard)}</td>
-                  <td>{t.unit == null ? '—' : `${num(t.unit)} ثانیه`}</td><td><span className={`badge badge-${effTone(t.eff)}`}>{pct(t.eff)}</span></td></tr>
-              </tbody>
-            </table></div>
-          </section>
-
-          {/* ---------- by worker ---------- */}
-          {!who && (
-            <section className="card">
-              <div className="card-head"><h2>مقایسهٔ نیروها</h2></div>
-              <HBars rows={res.workers.filter((w) => w.eff != null).map((w, i) => ({ name: w.name, v: pc(w.eff), c: PALETTE[i % 10] }))} unit="٪" />
-              <div className="table-wrap"><table className="table">
-                <thead><tr><th>نیرو</th><th>روز</th><th>عملیات</th><th>تولید</th><th>زمان صرف‌شده</th><th>زمان استاندارد</th><th>بهره‌وری</th><th>کارکرد مؤثر</th></tr></thead>
-                <tbody>{res.workers.map((w, i) => <tr key={w.key} className="clickable" onClick={() => setWho(w.key)}>
-                  <td>{i < 3 && w.eff != null && <span className="rank">{fa(i + 1)}</span>}{w.name}</td><td>{fa(w.days)}</td>
-                  <td>{fa(w.count)}{w.untimed ? <small className="muted"> ({fa(w.untimed)} بی‌ساعت)</small> : null}</td><td>{num(w.qty)}</td>
-                  <td className="mono">{hms(w.actual)}</td><td className="mono">{hms(w.standard)}</td>
-                  <td><span className={`badge badge-${effTone(w.eff)}`}>{pct(w.eff)}</span></td><td>{pct(w.effective)}</td></tr>)}</tbody>
-              </table></div>
-            </section>
-          )}
-
-          {/* ---------- worker × operation (Excel: گزارش بهره وری) ---------- */}
-          <section className="card">
-            <div className="card-head"><h2>بهره‌وری هر نیرو در هر عملیات</h2></div>
-            <Matrix res={res} />
-          </section>
-
-          {/* ---------- by product ---------- */}
-          <section className="card">
-            <div className="card-head"><h2>تولید به تفکیک محصول</h2><span className="muted small">{fa(res.products.length)} محصول</span></div>
-            <HBars rows={res.products.slice(0, 12).map((p) => ({ name: p.name, v: p.qty, c: 'var(--brand)' }))} unit="" wide />
-            <details className="more"><summary>جدول کامل محصولات</summary>
-              <div className="table-wrap"><table className="table">
-                <thead><tr><th>محصول</th><th>نوع</th><th>تولید</th><th>عملیات</th><th>بهره‌وری</th></tr></thead>
-                <tbody>{res.products.map((p) => <tr key={p.key}><td className="wrap">{p.name}</td><td>{p.type}</td><td>{num(p.qty)}</td><td>{fa(p.count)}</td>
-                  <td><span className={`badge badge-${effTone(p.eff)}`}>{pct(p.eff)}</span></td></tr>)}</tbody>
-              </table></div>
-            </details>
-          </section>
-
-          {/* ---------- daily ---------- */}
-          <section className="card">
-            <div className="card-head"><h2>گزارش روزانه</h2></div>
-            <div className="days">
-              {res.days.map((d) => {
-                const open = openDay === d.date
-                const dayJobs = open ? data.jobs.filter((j) => j.work_date === d.date) : []
-                const dayAtt = open ? att.filter((a) => a.work_date === d.date) : []
-                return (
-                  <div key={d.date} className={`day ${open ? 'open' : ''}`}>
-                    <button className="day-head" onClick={() => setOpenDay(open ? null : d.date)} aria-expanded={open}>
-                      <div><b>{jDateLong(d.date)}</b><small className="muted">{fa(d.count)} عملیات · {num(d.qty)} تولید</small></div>
-                      <div className="day-badges"><span className={`badge badge-${effTone(d.eff)}`}>{pct(d.eff)}</span>{d.effective != null && <span className="badge badge-soft">مؤثر {pct(d.effective)}</span>}</div>
-                    </button>
-                    {open && (
-                      <div className="day-body">
-                        {dayAtt.map((a) => {
-                          const il = a.in_diff_seconds == null ? null : inDiffLabel(Number(a.in_diff_seconds))
-                          return (
-                            <div key={a.id} className="att-line"><b>{a.worker_name}</b>
-                              <span>ورود {a.clock_in ? fa(a.clock_in.slice(0, 5)) : '—'} {il && <em className={`tone-${il.tone}`}>{il.text}</em>}</span>
-                              <span>خروج {a.clock_out ? fa(a.clock_out.slice(0, 5)) : '—'}</span></div>
-                          )
-                        })}
-                        <div className="table-wrap"><table className="table table-sm">
-                          <thead><tr><th>نیرو</th><th>عملیات</th><th>محصول</th><th>شروع</th><th>پایان</th><th>تعداد</th><th>صرف‌شده</th><th>استاندارد</th><th>بهره‌وری</th></tr></thead>
-                          <tbody>{dayJobs.map((j) => {
-                            const e = efficiency(Number(j.actual_seconds), Number(j.standard_total_seconds))
-                            return (
-                              <tr key={j.id}><td>{j.worker_name}</td><td><span className="dot" style={{ background: j.color }} />{j.stage_name}</td>
-                                <td className="wrap small">{j.product_name}</td><td className="mono">{j.start_time ? fa(j.start_time.slice(0, 5)) : '—'}</td>
-                                <td className="mono">{j.end_time ? fa(j.end_time.slice(0, 5)) : '—'}</td><td>{num(Number(j.quantity))}</td>
-                                <td className="mono">{j.actual_seconds == null ? '—' : hms(Number(j.actual_seconds))}</td>
-                                <td className="mono">{j.standard_total_seconds == null ? '—' : hms(Number(j.standard_total_seconds))}</td>
-                                <td>{j.actual_seconds == null ? <span className="muted small">بدون ساعت</span> : <span className={`badge badge-${effTone(e)}`}>{pct(e)}</span>}</td></tr>
-                            )
-                          })}</tbody>
-                        </table></div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </section>
-
-          <p className="formula-note">
-            <Icon name="target" size={14} /> بهره‌وری = زمان استاندارد ÷ زمان صرف‌شده · زمان استاندارد = تعداد × زمان استاندارد یک عدد<br />
-            <Icon name="bolt" size={14} /> کارکرد مؤثر = مجموع زمان عملیات ÷ مجموع زمان حضور · عملیات بدون ساعت شروع/پایان در بهره‌وری حساب نمی‌شوند
-          </p>
-        </>
-      )}
-    </div>
+      {children}
+    </section>
   )
 }
 
-function HBars({ rows, unit, wide }) {
-  if (!rows.length) return null
+function HBars({ rows, unit = '', color, wide, fmt }) {
+  if (!rows.length) return <p className="muted small">داده‌ای نیست</p>
+  const f = fmt || ((v) => fa(v) + unit)
   return (
     <div className="chart" dir="ltr">
-      <ResponsiveContainer width="100%" height={Math.max(120, rows.length * 38)}>
+      <ResponsiveContainer width="100%" height={Math.max(110, rows.length * 38)}>
         <BarChart data={rows} layout="vertical" margin={{ left: 4, right: 4, top: 4, bottom: 4 }}>
-          <XAxis type="number" hide reversed />
-          <YAxis type="category" dataKey="name" orientation="right" width={wide ? 210 : 110} tick={{ fontSize: 12, fill: 'var(--text)' }} axisLine={false} tickLine={false} />
+          <XAxis type="number" hide reversed domain={[0, 'auto']} />
+          <YAxis type="category" dataKey="name" orientation="right" width={wide ? 220 : 110} tick={{ fontSize: 12, fill: 'var(--text)' }} axisLine={false} tickLine={false} />
           {unit === '٪' && <ReferenceLine x={100} stroke="var(--good)" strokeDasharray="4 4" />}
-          <Tooltip formatter={(v) => [fa(v) + unit, unit ? 'بهره‌وری' : 'تولید']} cursor={{ fill: 'var(--soft)' }} />
+          <Tooltip formatter={(v) => [f(v), '']} separator="" cursor={{ fill: 'var(--soft)' }} />
           <Bar dataKey="v" radius={[8, 0, 0, 8]} barSize={20}>
-            {rows.map((r, i) => <Cell key={i} fill={r.c} />)}
-            <LabelList dataKey="v" position="insideLeft" formatter={(v) => fa(v) + unit} fill="#fff" fontSize={11} />
+            {rows.map((r, i) => <Cell key={i} fill={color ? color(r.v, i) : r.c || 'var(--brand)'} />)}
+            <LabelList dataKey="v" position="insideLeft" formatter={f} fill="#fff" fontSize={11} />
           </Bar>
         </BarChart>
       </ResponsiveContainer>
@@ -308,11 +99,207 @@ function HBars({ rows, unit, wide }) {
   )
 }
 
+function Trend({ data, mode, setMode, unit = '', color = 'var(--brand)', effColors }) {
+  const [kind, setKind] = useState('bar')
+  return (
+    <>
+      <div className="chart-opts">
+        <div className="seg sm">{[['day', 'روزانه'], ['week', 'هفتگی'], ['month', 'ماهانه']].map(([k, l]) => <button key={k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{l}</button>)}</div>
+        <div className="seg sm">{[['bar', 'میله‌ای'], ['line', 'خطی']].map(([k, l]) => <button key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>{l}</button>)}</div>
+      </div>
+      <div className="chart" dir="ltr">
+        <ResponsiveContainer width="100%" height={260}>
+          {kind === 'line' ? (
+            <LineChart data={data} margin={{ top: 10, right: 8, left: -6, bottom: 0 }}>
+              <CartesianGrid stroke="var(--line)" vertical={false} />
+              <XAxis dataKey="key" tickFormatter={(k) => bucketLabel(k, mode)} tick={{ fontSize: 11, fill: 'var(--muted)' }} reversed axisLine={false} tickLine={false} minTickGap={8} />
+              <YAxis orientation="right" tickFormatter={(v) => fa(v) + unit} tick={{ fontSize: 11, fill: 'var(--muted)' }} axisLine={false} tickLine={false} width={54} />
+              {unit === '٪' && <ReferenceLine y={100} stroke="var(--good)" strokeDasharray="4 4" />}
+              <Tooltip labelFormatter={(k) => (mode === 'day' ? jDateLong(k) : bucketLabel(k, mode))} formatter={(v) => [fa(v) + unit, '']} separator="" />
+              <Line type="monotone" dataKey="v" stroke={color} strokeWidth={3} dot={data.length < 35} connectNulls />
+            </LineChart>
+          ) : (
+            <BarChart data={data} margin={{ top: 10, right: 8, left: -6, bottom: 0 }}>
+              <CartesianGrid stroke="var(--line)" vertical={false} />
+              <XAxis dataKey="key" tickFormatter={(k) => bucketLabel(k, mode)} tick={{ fontSize: 11, fill: 'var(--muted)' }} reversed axisLine={false} tickLine={false} minTickGap={6} />
+              <YAxis orientation="right" tickFormatter={(v) => fa(v) + unit} tick={{ fontSize: 11, fill: 'var(--muted)' }} axisLine={false} tickLine={false} width={54} />
+              {unit === '٪' && <ReferenceLine y={100} stroke="var(--good)" strokeDasharray="4 4" />}
+              <Tooltip labelFormatter={(k) => (mode === 'day' ? jDateLong(k) : bucketLabel(k, mode))} formatter={(v) => [fa(v) + unit, '']} separator="" cursor={{ fill: 'var(--soft)' }} />
+              <Bar dataKey="v" radius={[6, 6, 0, 0]}>{data.map((r) => <Cell key={r.key} fill={effColors ? EFF_COLOR(r.v) : color} />)}</Bar>
+            </BarChart>
+          )}
+        </ResponsiveContainer>
+      </div>
+    </>
+  )
+}
+
+/* ================================ PAGE ================================ */
+export default function Reports({ workers = [] }) {
+  const access = useAccess()
+  const tabs = [
+    can(access, 'reports_staff') && ['staff', 'کارکنان', 'users'],
+    can(access, 'reports_production') && ['production', 'تولید', 'layers'],
+    can(access, 'reports_sales') && ['sales', 'فروش', 'tag'],
+  ].filter(Boolean)
+  const [tab, setTab] = useState(tabs[0]?.[0])
+  const [preset, setPreset] = useState('month')
+  const [[from, to], setRange] = useState(presetRange('month'))
+  const [types, setTypes] = useState([])
+  useEffect(() => { supabase.from('product_types').select('id, name').order('sort_order').then(({ data }) => setTypes(data || [])) }, [])
+
+  if (!tabs.length) return <div className="page"><Empty icon="alert" title="به گزارش‌ها دسترسی ندارید" /></div>
+  const range = [from, to]
+  return (
+    <div className="page">
+      <div className="page-title"><h1>گزارش‌ها</h1></div>
+      <div className="tabs" role="tablist">
+        {tabs.map(([k, l, ic]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon name={ic} size={16} />{l}</button>)}
+      </div>
+      <div className="card filters">
+        <div className="chips">{PRESETS.map(([k, l]) => <button key={k} className={`chip ${preset === k ? 'on' : ''}`} onClick={() => { setPreset(k); setRange(presetRange(k)) }}>{l}</button>)}</div>
+        <div className="range">
+          <div><span className="muted small">از</span><JDateInput value={from} onChange={(v) => { setPreset(null); setRange([v, v > to ? v : to]) }} label="از تاریخ" /></div>
+          <div><span className="muted small">تا</span><JDateInput value={to} onChange={(v) => { setPreset(null); setRange([v < from ? v : from, v]) }} label="تا تاریخ" /></div>
+        </div>
+      </div>
+      {tab === 'staff' && <StaffReport range={range} workers={workers} />}
+      {tab === 'production' && <ProductionReport range={range} types={types} />}
+      {tab === 'sales' && <SalesReport range={range} types={types} />}
+    </div>
+  )
+}
+
+function useRows(view, dateCol, range, filters, deps) {
+  const toast = useToast()
+  const [rows, setRows] = useState(null)
+  useEffect(() => {
+    let alive = true
+    setRows(null)
+    let q = supabase.from(view).select('*').gte(dateCol, range[0]).lte(dateCol, range[1]).order(dateCol)
+    for (const [k, v] of Object.entries(filters)) if (v != null) q = q.eq(k, v)
+    q.limit(50000).then(({ data, error }) => {
+      if (!alive) return
+      if (error) toast(errText(error), 'bad')
+      setRows(data || [])
+    })
+    return () => { alive = false }
+  }, [view, dateCol, range[0], range[1], ...deps]) // eslint-disable-line react-hooks/exhaustive-deps
+  return rows
+}
+
+/* ================================ STAFF ================================ */
+function StaffReport({ range, workers }) {
+  const [who, setWho] = useState(null)
+  const [mode, setMode] = useState('day')
+  const [wh] = useWorkHours()
+  const jobs = useRows('v_jobs', 'work_date', range, { worker_id: who }, [who])
+  const att = useRows('v_attendance', 'work_date', range, { worker_id: who }, [who])
+
+  const r = useMemo(() => {
+    if (!jobs || !att) return null
+    const res = analyze(jobs, [])
+    const opByDay = new Map()
+    for (const j of jobs) if (j.actual_seconds != null) { const k = `${j.worker_id}|${j.work_date}`; opByDay.set(k, (opByDay.get(k) || 0) + Number(j.actual_seconds) / 60) }
+    const per = new Map()
+    const T = { days: 0, presence: 0, work: 0, net: 0, breaks: 0, overtime: 0, otDays: 0, deficit: 0, ops: 0, idle: 0 }
+    const daily = []
+    for (const a of att) {
+      const m = dayMetrics(a, wh)
+      if (!m) continue
+      const ops = opByDay.get(`${a.worker_id}|${a.work_date}`) || 0
+      const idle = Math.max(0, m.net - ops)
+      if (!per.has(a.worker_id)) per.set(a.worker_id, { key: a.worker_id, name: a.worker_name, days: 0, presence: 0, work: 0, net: 0, breaks: 0, overtime: 0, otDays: 0, deficit: 0, ops: 0, idle: 0 })
+      for (const g of [per.get(a.worker_id), T]) {
+        g.days += 1; g.presence += m.presence; g.work += m.work; g.net += m.net; g.breaks += m.breaks
+        g.overtime += m.overtime; g.otDays += m.overtime > 0 ? 1 : 0; g.deficit += m.deficit; g.ops += ops; g.idle += idle
+      }
+      daily.push({ ...a, m, ops, idle })
+    }
+    const effW = Object.fromEntries(res.workers.map((w) => [w.key, w]))
+    const names = new Map([...res.workers.map((w) => [w.key, w.name]), ...[...per.values()].map((p) => [p.key, p.name])])
+    const people = [...names.keys()].map((id) => ({ id, name: names.get(id), eff: effW[id]?.eff ?? null, ew: effW[id], p: per.get(id) }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'fa'))
+    const trendMap = new Map()
+    for (const j of jobs) {
+      if (j.actual_seconds == null || j.standard_total_seconds == null) continue
+      const k = bucketOf(j.work_date, mode); const b = trendMap.get(k) || { a: 0, s: 0 }
+      b.a += Number(j.actual_seconds); b.s += Number(j.standard_total_seconds); trendMap.set(k, b)
+    }
+    const trend = [...trendMap.entries()].sort().map(([key, b]) => ({ key, v: pc(efficiency(b.a, b.s)) }))
+    return { res, people, T, daily: daily.sort((a, b) => (a.work_date < b.work_date ? 1 : -1)), trend }
+  }, [jobs, att, wh, mode])
+
+  const workerItems = workers.map((w) => ({ id: w.id, name: w.full_name }))
+  return (
+    <>
+      <div className="card filters"><SearchSelect label="همکار" items={workerItems} value={who} onChange={setWho} allLabel="همهٔ کارکنان" /></div>
+      {!r ? <div className="page-center"><Spinner size={28} /></div> : r.people.length === 0 ? <Empty icon="users" title="در این بازه اطلاعاتی ثبت نشده" /> : (
+        <>
+          <div className="kpis">
+            <Kpi icon="target" label="بهره‌وری کل" value={pct(r.res.total.eff)} tone={effTone(r.res.total.eff)} sub="استاندارد ÷ صرف‌شده" />
+            <Kpi icon="bolt" label="حضور مؤثر کل" value={pct(r.T.net ? r.T.ops / r.T.net : null)} sub="عملیات ÷ (حضور − استراحت‌ها)" />
+            <Kpi icon="clock" label="کل ساعت کارکرد" value={hm(r.T.work)} sub={`${fa(r.T.days)} روز-نفر`} />
+            <Kpi icon="plus" label="کل اضافه‌کار" value={hm(r.T.overtime)} tone={r.T.overtime ? 'info' : ''} sub={`${fa(r.T.otDays)} روز`} />
+            <Kpi icon="alert" label="کل زمان بیکار" value={hm(r.T.idle)} tone={r.T.idle ? 'warn' : ''} />
+          </div>
+
+          <Section title="بهره‌وری هر کارمند" sub="زمان استاندارد ÷ زمان صرف‌شده · سبز ۹۵٪ به بالا، زرد ۸۰ تا ۹۵٪، قرمز زیر ۸۰٪" range={range}
+            rows={() => [['کارمند', 'زمان صرف‌شده (دقیقه)', 'زمان استاندارد (دقیقه)', 'بهره‌وری ٪'], ...r.people.map((p) => [p.name, Math.round((p.ew?.actual || 0) / 60), Math.round((p.ew?.standard || 0) / 60), pc(p.eff) ?? ''])]}>
+            <HBars rows={r.people.filter((p) => p.eff != null).map((p) => ({ name: p.name, v: pc(p.eff) }))} unit="٪" color={EFF_COLOR} />
+          </Section>
+
+          <Section title="حضور مؤثر هر کارمند" sub="مجموع زمان عملیات ÷ (زمان حضور − صبحانه − ناهار − استراحت)" range={range}
+            rows={() => [['کارمند', 'زمان عملیات (ساعت)', 'حضور خالص (ساعت)', 'حضور مؤثر ٪'], ...r.people.map((p) => [p.name, hrs(p.p?.ops || 0), hrs(p.p?.net || 0), p.p?.net ? pc(p.p.ops / p.p.net) : ''])]}>
+            <HBars rows={r.people.filter((p) => p.p?.net).map((p) => ({ name: p.name, v: pc(p.p.ops / p.p.net) }))} unit="٪" color={EFF_COLOR} />
+          </Section>
+
+          <Section title="اضافه‌کار هر کارمند" sub="هر روز: (حضور − ناهار) − ساعت موظف (شنبه تا چهارشنبه ۸ ساعت، پنجشنبه ۴ ساعت)" range={range}
+            rows={() => [['کارمند', 'روزهای حضور', 'روزهای اضافه‌کار', 'اضافه‌کار (ساعت)', 'کسر کار (ساعت)'], ...r.people.map((p) => [p.name, p.p?.days || 0, p.p?.otDays || 0, hrs(p.p?.overtime || 0), hrs(p.p?.deficit || 0)])]}>
+            <HBars rows={r.people.filter((p) => p.p).map((p, i) => ({ name: p.name, v: hrs(p.p.overtime), c: PALETTE[i % 10] }))} fmt={(v) => hm(v * 60)} color={() => 'var(--info)'} />
+          </Section>
+
+          <Section title="ساعت کارکرد هر کارمند" sub="زمان حضور − ناهار" range={range}
+            rows={() => [['کارمند', 'روزهای حضور', 'کل حضور (ساعت)', 'ناهار (ساعت)', 'ساعت کارکرد'], ...r.people.map((p) => [p.name, p.p?.days || 0, hrs(p.p?.presence || 0), hrs((p.p?.presence || 0) - (p.p?.work || 0)), hrs(p.p?.work || 0)])]}>
+            <HBars rows={r.people.filter((p) => p.p).map((p) => ({ name: p.name, v: hrs(p.p.work) }))} fmt={(v) => hm(v * 60)} color={() => 'var(--brand)'} />
+          </Section>
+
+          <Section title="زمان بیکار هر کارمند" sub="زمان حضور − زمان عملیات‌ها − صبحانه − ناهار − استراحت" range={range}
+            rows={() => [['کارمند', 'کل حضور (ساعت)', 'استراحت‌ها (ساعت)', 'زمان عملیات (ساعت)', 'زمان بیکار (ساعت)'], ...r.people.map((p) => [p.name, hrs(p.p?.presence || 0), hrs(p.p?.breaks || 0), hrs(p.p?.ops || 0), hrs(p.p?.idle || 0)])]}>
+            <HBars rows={r.people.filter((p) => p.p).map((p) => ({ name: p.name, v: hrs(p.p.idle) }))} fmt={(v) => hm(v * 60)} color={() => 'var(--warn)'} />
+          </Section>
+
+          <Section title="بهره‌وری هر کارمند در هر عملیات" range={range}
+            rows={() => [['کارمند', ...r.res.stages.map((s) => s.name), 'کل'], ...r.res.workers.map((w) => [w.name, ...r.res.stages.map((s) => pc(r.res.workerStage.find((c) => c.worker_id === w.key && c.stage_id === s.key)?.eff) ?? ''), pc(w.eff) ?? ''])]}>
+            <Matrix res={r.res} />
+          </Section>
+
+          <Section title="روند بهره‌وری" range={range} rows={() => [['دوره', 'بهره‌وری ٪'], ...r.trend.map((t) => [mode === 'day' ? jIso(t.key) : bucketLabel(t.key, mode), t.v ?? ''])]}>
+            <Trend data={r.trend} mode={mode} setMode={setMode} unit="٪" effColors />
+          </Section>
+
+          <Section title="جزئیات روزانهٔ حضور" range={range}
+            rows={() => [['تاریخ', 'کارمند', 'ورود', 'خروج', 'صبحانه', 'ناهار', 'استراحت', 'حضور', 'کارکرد', 'اضافه‌کار', 'زمان عملیات', 'بیکار', 'حضور مؤثر ٪'],
+              ...r.daily.map((d) => [jIso(d.work_date), d.worker_name, d.clock_in?.slice(0, 5), d.clock_out?.slice(0, 5), hrs(d.m.bf), hrs(d.m.lunch), hrs(d.m.rest), hrs(d.m.presence), hrs(d.m.work), hrs(d.m.overtime), hrs(d.ops), hrs(d.idle), d.m.net ? pc(d.ops / d.m.net) : ''])]}>
+            <div className="table-wrap"><table className="table table-sm">
+              <thead><tr><th>تاریخ</th><th>کارمند</th><th>ورود</th><th>خروج</th><th>کارکرد</th><th>اضافه‌کار</th><th>عملیات</th><th>بیکار</th><th>مؤثر</th></tr></thead>
+              <tbody>{r.daily.slice(0, 300).map((d) => (
+                <tr key={d.id}><td>{jDate(d.work_date)}</td><td>{d.worker_name}</td><td className="mono">{fa(d.clock_in?.slice(0, 5))}</td><td className="mono">{fa(d.clock_out?.slice(0, 5))}</td>
+                  <td className="mono">{hm(d.m.work)}</td><td className="mono">{d.m.overtime ? hm(d.m.overtime) : '—'}</td><td className="mono">{hm(d.ops)}</td><td className="mono">{hm(d.idle)}</td>
+                  <td><span className={`badge badge-${effTone(d.m.net ? d.ops / d.m.net : null)}`}>{pct(d.m.net ? d.ops / d.m.net : null)}</span></td></tr>))}</tbody>
+            </table></div>
+          </Section>
+        </>
+      )}
+    </>
+  )
+}
+
 function Matrix({ res }) {
   const cell = Object.fromEntries(res.workerStage.map((c) => [`${c.worker_id}|${c.stage_id}`, c]))
   return (
     <div className="table-wrap"><table className="table matrix">
-      <thead><tr><th>نیرو</th>{res.stages.map((s) => <th key={s.key}><span className="dot" style={{ background: s.color }} />{s.name}</th>)}<th>کل</th></tr></thead>
+      <thead><tr><th>کارمند</th>{res.stages.map((s) => <th key={s.key}><span className="dot" style={{ background: s.color }} />{s.name}</th>)}<th>کل</th></tr></thead>
       <tbody>{res.workers.map((w) => <tr key={w.key}><td><b>{w.name}</b></td>
         {res.stages.map((s) => {
           const c = cell[`${w.key}|${s.key}`]
@@ -323,103 +310,181 @@ function Matrix({ res }) {
   )
 }
 
-function Tip({ active, payload, label, mode, unit }) {
-  if (!active || !payload?.length) return null
-  const { jy, jm } = jParts(label)
-  const title = mode === 'month' ? `${MONTHS[jm - 1]} ${fa(jy)}` : mode === 'week' ? `هفتهٔ ${jDate(label)} تا ${jDate(addDays(label, 6))}` : jDateLong(label)
+/* ================================ PRODUCTION ================================ */
+function ProductionReport({ range, types }) {
+  const [group, setGroup] = useState(null)
+  const [mode, setMode] = useState('day')
+  const jobs = useRows('v_jobs', 'work_date', range, { type_id: group }, [group])
+
+  const r = useMemo(() => {
+    if (!jobs) return null
+    const packed = jobs.filter((j) => j.is_packaging)
+    const sum = (arr) => arr.reduce((s, j) => s + Number(j.quantity), 0)
+    const byType = new Map(), byProduct = new Map(), byStage = new Map(), stageType = new Map(), trendM = new Map()
+    for (const j of packed) {
+      byType.set(j.type_name, (byType.get(j.type_name) || 0) + Number(j.quantity))
+      const p = byProduct.get(j.product_id) || { name: j.product_name, type: j.type_name, qty: 0 }
+      p.qty += Number(j.quantity); byProduct.set(j.product_id, p)
+      const k = bucketOf(j.work_date, mode); trendM.set(k, (trendM.get(k) || 0) + Number(j.quantity))
+    }
+    for (const j of jobs) {
+      const s = byStage.get(j.stage_id) || { name: j.stage_name, color: j.color, qty: 0, packaging: j.is_packaging }
+      s.qty += Number(j.quantity); byStage.set(j.stage_id, s)
+      const st = stageType.get(j.stage_id) || {}; st[j.type_name] = (st[j.type_name] || 0) + Number(j.quantity); stageType.set(j.stage_id, st)
+    }
+    return {
+      total: sum(packed), hasPackaging: jobs.some((j) => j.is_packaging),
+      types: [...byType.entries()].map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty),
+      products: [...byProduct.values()].sort((a, b) => b.qty - a.qty),
+      stages: [...byStage.values()].sort((a, b) => b.qty - a.qty),
+      stageType, stageList: [...byStage.entries()],
+      trend: [...trendM.entries()].sort().map(([key, v]) => ({ key, v })),
+    }
+  }, [jobs, mode])
+
+  const typeNames = types.map((t) => t.name)
   return (
-    <div className="tip" dir="rtl"><b>{title}</b>
-      {payload.filter((p) => p.value != null).map((p) => (
-        <div key={p.dataKey}><span className="dot" style={{ background: p.color || p.fill }} />{p.name}: <b>{fa(typeof p.value === 'number' ? Math.round(p.value * 10) / 10 : p.value)}{unit}</b></div>
-      ))}
-    </div>
+    <>
+      <div className="card filters"><SearchSelect label="گروه محصول" items={types} value={group} onChange={setGroup} allLabel="همهٔ گروه‌ها" /></div>
+      {!r ? <div className="page-center"><Spinner size={28} /></div> : !jobs.length ? <Empty icon="layers" title="در این بازه تولیدی ثبت نشده" /> : (
+        <>
+          {!r.hasPackaging && <div className="banner banner-warn"><Icon name="alert" /><div>در این بازه عملیات «بسته‌بندی» ثبت نشده؛ تولید کل از تعداد بسته‌بندی‌شده حساب می‌شود، پس صفر است.</div></div>}
+          <div className="kpis">
+            <Kpi icon="box" label="تولید کل (بسته‌بندی‌شده)" value={num(r.total)} tone="good" sub="همهٔ محصولات" />
+            {r.types.map((t) => <Kpi key={t.name} icon="tag" label={`تولید ${t.name}`} value={num(t.qty)} sub="بسته‌بندی‌شده" />)}
+          </div>
+
+          <Section title="تولید کل هر گروه محصول" sub="فقط محصولات بسته‌بندی‌شده" range={range}
+            rows={() => [['گروه محصول', 'تعداد بسته‌بندی‌شده', 'سهم ٪'], ...r.types.map((t) => [t.name, t.qty, r.total ? pc(t.qty / r.total) : '']), ['جمع کل', r.total, 100]]}>
+            <HBars rows={r.types.map((t, i) => ({ name: t.name, v: t.qty, c: PALETTE[i % 10] }))} fmt={(v) => num(v)} />
+          </Section>
+
+          <Section title="تولید هر عملیات" sub="مجموع تعداد ثبت‌شده در هر عملیات" range={range}
+            rows={() => [['عملیات', 'تعداد'], ...r.stages.map((s) => [s.name, s.qty])]}>
+            <HBars rows={r.stages.map((s) => ({ name: s.name, v: s.qty, c: s.color }))} fmt={(v) => num(v)} />
+          </Section>
+
+          <Section title="تعداد بسته‌بندی هر محصول" sub={`${fa(r.products.length)} محصول`} range={range}
+            rows={() => [['محصول', 'گروه', 'تعداد بسته‌بندی‌شده'], ...r.products.map((p) => [p.name, p.type, p.qty])]}>
+            <HBars rows={r.products.slice(0, 15).map((p) => ({ name: p.name, v: p.qty }))} fmt={(v) => num(v)} wide />
+            {r.products.length > 15 && (
+              <details className="more"><summary>جدول کامل ({fa(r.products.length)} محصول)</summary>
+                <div className="table-wrap"><table className="table">
+                  <thead><tr><th>محصول</th><th>گروه</th><th>بسته‌بندی‌شده</th></tr></thead>
+                  <tbody>{r.products.map((p) => <tr key={p.name}><td className="wrap">{p.name}</td><td>{p.type}</td><td>{num(p.qty)}</td></tr>)}</tbody>
+                </table></div>
+              </details>
+            )}
+          </Section>
+
+          <Section title="روند تولید (بسته‌بندی‌شده)" range={range} rows={() => [['دوره', 'تعداد'], ...r.trend.map((t) => [mode === 'day' ? jIso(t.key) : bucketLabel(t.key, mode), t.v])]}>
+            <Trend data={r.trend} mode={mode} setMode={setMode} color="var(--accent)" />
+          </Section>
+
+          <Section title="تولید هر عملیات به تفکیک گروه محصول" range={range}
+            rows={() => [['عملیات', ...typeNames, 'جمع'], ...r.stageList.map(([id, s]) => [s.name, ...typeNames.map((t) => r.stageType.get(id)?.[t] || 0), s.qty])]}>
+            <div className="table-wrap"><table className="table matrix">
+              <thead><tr><th>عملیات</th>{typeNames.map((t) => <th key={t}>{t}</th>)}<th>جمع</th></tr></thead>
+              <tbody>{r.stageList.map(([id, s]) => <tr key={id}><td><span className="dot" style={{ background: s.color }} />{s.name}</td>
+                {typeNames.map((t) => <td key={t}>{r.stageType.get(id)?.[t] ? num(r.stageType.get(id)[t]) : ''}</td>)}<td><b>{num(s.qty)}</b></td></tr>)}</tbody>
+            </table></div>
+          </Section>
+        </>
+      )}
+    </>
   )
 }
 
-/* ---------------- Excel export (mirrors the company workbook) ---------------- */
-let xlsxPromise = null
-const loadXlsx = () => (xlsxPromise ||= import('xlsx').catch((e) => { xlsxPromise = null; throw e }))
+/* ================================ SALES ================================ */
+function SalesReport({ range, types }) {
+  const [group, setGroup] = useState(null)
+  const [customer, setCustomer] = useState(null)
+  const [customers, setCustomers] = useState([])
+  const [mode, setMode] = useState('day')
+  const [metric, setMetric] = useState('amount')
+  useEffect(() => {
+    supabase.from('customers').select('id, code, first_name, last_name').order('first_name').then(({ data }) =>
+      setCustomers((data || []).map((c) => ({ id: c.id, name: `${c.first_name} ${c.last_name}`.trim(), sub: `کد ${fa(c.code)}` }))))
+  }, [])
+  const sales = useRows('v_sales', 'sale_date', range, { type_id: group, customer_id: customer }, [group, customer])
 
-/** Saves a Blob in a way that works on desktop, Android, iOS Safari and installed (home-screen) apps. */
-async function saveBlob(blob, filename) {
-  const ua = navigator.userAgent
-  const ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  const standalone = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone
-  const inApp = /Instagram|FBAN|FBAV|Telegram|WhatsApp|; wv\)/i.test(ua)
-  if (ios || standalone || inApp) {
-    const file = new File([blob], filename, { type: blob.type })
-    if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: filename }); return 'share' }
-  }
-  const url = URL.createObjectURL(blob)
-  if (ios || inApp) { window.open(url, '_blank'); setTimeout(() => URL.revokeObjectURL(url), 60000); return 'tab' }
-  const a = document.createElement('a')
-  a.href = url; a.download = filename; a.rel = 'noopener'
-  document.body.appendChild(a); a.click(); a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 60000)
-  return 'download'
+  const r = useMemo(() => {
+    if (!sales) return null
+    let qty = 0, amount = 0
+    const byType = new Map(), byProduct = new Map(), byCust = new Map(), trendM = new Map()
+    for (const s of sales) {
+      const q = Number(s.quantity), a = Number(s.amount)
+      qty += q; amount += a
+      const t = byType.get(s.type_name) || { name: s.type_name, qty: 0, amount: 0 }; t.qty += q; t.amount += a; byType.set(s.type_name, t)
+      const p = byProduct.get(s.product_id) || { name: s.product_name, type: s.type_name, qty: 0, amount: 0 }; p.qty += q; p.amount += a; byProduct.set(s.product_id, p)
+      const c = byCust.get(s.customer_id) || { name: s.customer_name, code: s.customer_code, qty: 0, amount: 0, types: new Set(), products: new Set() }
+      c.qty += q; c.amount += a; c.types.add(s.type_name); c.products.add(s.product_id); byCust.set(s.customer_id, c)
+      const k = bucketOf(s.sale_date, mode); const b = trendM.get(k) || { qty: 0, amount: 0 }; b.qty += q; b.amount += a; trendM.set(k, b)
+    }
+    return {
+      qty, amount,
+      types: [...byType.values()].sort((a, b) => b.amount - a.amount || b.qty - a.qty),
+      products: [...byProduct.values()].sort((a, b) => b.amount - a.amount || b.qty - a.qty),
+      customers: [...byCust.values()].sort((a, b) => b.amount - a.amount || b.qty - a.qty),
+      trend: [...trendM.entries()].sort().map(([key, b]) => ({ key, v: metric === 'amount' ? b.amount : b.qty })),
+    }
+  }, [sales, mode, metric])
+
+  return (
+    <>
+      <div className="card filters grid2">
+        <SearchSelect label="گروه محصول" items={types} value={group} onChange={setGroup} allLabel="همهٔ گروه‌ها" />
+        <SearchSelect label="مشتری" items={customers} value={customer} onChange={setCustomer} allLabel="همهٔ مشتریان" />
+      </div>
+      {!r ? <div className="page-center"><Spinner size={28} /></div> : !sales.length ? <Empty icon="tag" title="در این بازه فروشی ثبت نشده" /> : (
+        <>
+          <div className="kpis">
+            <Kpi icon="tag" label="مبلغ کل فروش" value={money(r.amount)} tone="good" />
+            <Kpi icon="box" label="تعداد کل فروش" value={num(r.qty)} sub={`${fa(r.products.length)} محصول`} />
+            <Kpi icon="users" label="مشتریان" value={fa(r.customers.length)} />
+          </div>
+
+          <Section title="درصد فروش هر گروه محصول" sub="سهم هر گروه از کل فروش (بر اساس مبلغ و تعداد)" range={range}
+            rows={() => [['گروه محصول', 'تعداد', 'سهم از تعداد ٪', 'مبلغ (تومان)', 'سهم از مبلغ ٪'], ...r.types.map((t) => [t.name, t.qty, r.qty ? pc(t.qty / r.qty) : '', t.amount, r.amount ? pc(t.amount / r.amount) : ''])]}>
+            <div className="share">
+              {r.types.map((t, i) => {
+                const share = r.amount ? t.amount / r.amount : r.qty ? t.qty / r.qty : 0
+                return (
+                  <div key={t.name} className="share-row">
+                    <div className="share-head"><b>{t.name}</b><span>{pct(share)}</span></div>
+                    <div className="share-bar"><span style={{ width: `${Math.max(2, share * 100)}%`, background: PALETTE[i % 10] }} /></div>
+                    <small className="muted">{num(t.qty)} عدد ({pct(r.qty ? t.qty / r.qty : null)} از تعداد) · {money(t.amount)}</small>
+                  </div>
+                )
+              })}
+            </div>
+          </Section>
+
+          <Section title="فروش هر محصول" range={range}
+            rows={() => [['محصول', 'گروه', 'تعداد', 'مبلغ (تومان)', 'سهم از مبلغ ٪'], ...r.products.map((p) => [p.name, p.type, p.qty, p.amount, r.amount ? pc(p.amount / r.amount) : ''])]}>
+            <HBars rows={r.products.slice(0, 15).map((p) => ({ name: p.name, v: p.qty }))} fmt={(v) => num(v)} wide />
+            <div className="table-wrap"><table className="table">
+              <thead><tr><th>محصول</th><th>گروه</th><th>تعداد</th><th>مبلغ</th><th>سهم</th></tr></thead>
+              <tbody>{r.products.map((p) => <tr key={p.name}><td className="wrap">{p.name}</td><td>{p.type}</td><td>{num(p.qty)}</td><td>{money(p.amount)}</td><td>{pct(r.amount ? p.amount / r.amount : null)}</td></tr>)}</tbody>
+            </table></div>
+          </Section>
+
+          <Section title="فروش به هر مشتری" range={range}
+            rows={() => [['کد مشتری', 'مشتری', 'تعداد کل', 'مبلغ کل (تومان)', 'گروه‌های محصول', 'تعداد انواع محصول'], ...r.customers.map((c) => [c.code, c.name, c.qty, c.amount, [...c.types].join('، '), c.products.size])]}>
+            <div className="table-wrap"><table className="table">
+              <thead><tr><th>مشتری</th><th>تعداد کل</th><th>مبلغ کل</th><th>گروه‌های محصول</th><th>انواع محصول</th></tr></thead>
+              <tbody>{r.customers.map((c) => <tr key={c.code}><td><b>{c.name}</b> <small className="muted">کد {fa(c.code)}</small></td><td>{num(c.qty)}</td><td>{money(c.amount)}</td>
+                <td className="wrap">{[...c.types].join('، ')}</td><td>{fa(c.products.size)}</td></tr>)}</tbody>
+            </table></div>
+          </Section>
+
+          <Section title="روند فروش" range={range} actions={<div className="seg sm">{[['amount', 'مبلغ'], ['qty', 'تعداد']].map(([k, l]) => <button key={k} className={metric === k ? 'on' : ''} onClick={() => setMetric(k)}>{l}</button>)}</div>}
+            rows={() => [['دوره', metric === 'amount' ? 'مبلغ (تومان)' : 'تعداد'], ...r.trend.map((t) => [mode === 'day' ? jIso(t.key) : bucketLabel(t.key, mode), t.v])]}>
+            <Trend data={r.trend} mode={mode} setMode={setMode} color="var(--good)" />
+          </Section>
+        </>
+      )}
+    </>
+  )
 }
 
-async function buildWorkbook({ data, res, att, from, to, nameOf }) {
-  const XLSX = await loadXlsx()
-  const r2 = (v, d = 2) => (v == null || !Number.isFinite(v) ? '' : Math.round(v * 10 ** d) / 10 ** d)
-  const pctv = (v) => (v == null ? '' : r2(v * 100, 1))
-  const book = XLSX.utils.book_new()
-  const add = (name, rows, widths) => {
-    const ws = XLSX.utils.aoa_to_sheet(rows)
-    if (widths) ws['!cols'] = widths.map((w) => ({ wch: w }))
-    XLSX.utils.book_append_sheet(book, ws, name)
-  }
-
-  // 1. raw data — same columns as the monthly sheet
-  add('داده‌ها', [
-    ['تاریخ', 'نام محصول', 'نام عملیات', 'نوع محصول', 'تعداد', 'ساعت شروع', 'ساعت پایان', 'اپراتور', 'زمان استاندارد (ثانیه)', 'مدت زمان صرف شده (دقیقه)', 'مدت زمان استاندارد (دقیقه)', 'زمان واقعی یک عدد (ثانیه)', 'بهره‌وری ٪', 'توضیح'],
-    ...data.jobs.map((j) => {
-      const A = j.actual_seconds == null ? null : Number(j.actual_seconds), Q = Number(j.quantity), S = j.standard_total_seconds == null ? null : Number(j.standard_total_seconds)
-      return [jIso(j.work_date), j.product_name, j.stage_name, j.type_name, Q, j.start_time?.slice(0, 5) || '', j.end_time?.slice(0, 5) || '', j.worker_name,
-        j.std_per_unit == null ? '' : Number(j.std_per_unit), A == null ? '' : r2(A / 60), S == null ? '' : r2(S / 60), r2(perUnit(A, Q)), pctv(efficiency(A, S)), j.note || '']
-    }),
-  ], [11, 40, 16, 12, 8, 10, 10, 12, 12, 14, 14, 14, 10, 20])
-
-  // 2. efficiency per worker and per worker × operation (Excel "گزارش بهره وری")
-  const eff = [['نیرو', 'مدت زمان صرف شده (دقیقه)', 'مدت زمان استاندارد (دقیقه)', 'بهره‌وری ٪'],
-    ...res.workers.map((w) => [w.name, r2(w.actual / 60), r2(w.standard / 60), pctv(w.eff)]),
-    ['جمع کل', r2(res.total.actual / 60), r2(res.total.standard / 60), pctv(res.total.eff)], [],
-    ['نیرو / عملیات', 'مدت زمان صرف شده (دقیقه)', 'مدت زمان استاندارد (دقیقه)', 'بهره‌وری ٪']]
-  for (const w of res.workers) {
-    eff.push([w.name, r2(w.actual / 60), r2(w.standard / 60), pctv(w.eff)])
-    for (const c of res.workerStage.filter((x) => x.worker_id === w.key)) eff.push(['    ' + c.stage, r2(c.actual / 60), r2(c.standard / 60), pctv(c.eff)])
-  }
-  add('گزارش بهره وری', eff, [26, 22, 22, 12])
-
-  // 3. by operation
-  add('به تفکیک عملیات', [['عملیات', 'تولید', 'تعداد عملیات', 'صرف شده (دقیقه)', 'استاندارد (دقیقه)', 'زمان واقعی یک عدد (ثانیه)', 'بهره‌وری ٪'],
-    ...res.stages.map((s) => [s.name, s.qty, s.count, r2(s.actual / 60), r2(s.standard / 60), r2(s.unit), pctv(s.eff)])], [18, 10, 12, 16, 16, 20, 12])
-
-  // 4. production report (Excel "گزارش تولید")
-  const cell = Object.fromEntries(res.workerStage.map((c) => [`${c.worker_id}|${c.stage_id}`, c]))
-  const prod = [['میانگین زمان واقعی یک عدد (ثانیه)', ...res.workers.map((w) => w.name), 'کل'],
-    ...res.stages.map((s) => [s.name, ...res.workers.map((w) => r2(cell[`${w.key}|${s.key}`]?.unit)), r2(s.unit)]), [],
-    ['جمع تعداد', ...res.stages.map((s) => s.name), 'کل']]
-  const pq = {}
-  for (const j of data.jobs) { (pq[j.product_name] ||= {})[j.stage_id] = (pq[j.product_name][j.stage_id] || 0) + Number(j.quantity) }
-  for (const p of res.products) prod.push([p.name, ...res.stages.map((s) => pq[p.name]?.[s.key] || ''), p.qty])
-  add('گزارش تولید', prod, [40, ...res.stages.map(() => 12), 10])
-
-  // 5. work duration (Excel "مدت کارکرد")
-  add('مدت کارکرد', [['نیرو', 'مدت زمان فعال (دقیقه)', 'مدت زمان فعال (ساعت)', 'کل مدت حضور (ساعت)', 'درصد حضور مؤثر ٪', 'تأخیر ورود (دقیقه)'],
-    ...res.workers.map((w) => {
-      const active = data.jobs.filter((j) => j.worker_id === w.key && j.actual_seconds != null).reduce((s, j) => s + Number(j.actual_seconds), 0)
-      return [w.name, r2(active / 60), r2(active / 3600), w.presence ? r2(w.presence / 3600) : '', pctv(w.effective), r2(w.late / 60)]
-    })], [14, 18, 18, 18, 16, 16])
-
-  // 6. attendance
-  if (att.length) add('حضور', [['تاریخ', 'نیرو', 'ورود', 'خروج', 'ورود مقرر', 'خروج مقرر', 'تأخیر ورود (دقیقه)', 'حضور (ساعت)'],
-    ...[...att].sort((a, b) => (a.work_date < b.work_date ? -1 : 1)).map((a) => [jIso(a.work_date), nameOf[a.worker_id], a.clock_in?.slice(0, 5) || '', a.clock_out?.slice(0, 5) || '',
-      a.expected_in?.slice(0, 5), a.expected_out?.slice(0, 5), a.in_diff_seconds == null ? '' : r2(Number(a.in_diff_seconds) / 60), a.presence_seconds == null ? '' : r2(Number(a.presence_seconds) / 3600)])],
-  [11, 14, 8, 8, 10, 10, 16, 12])
-
-  book.Workbook = { Views: [{ RTL: true }] }
-  const bytes = XLSX.write(book, { bookType: 'xlsx', type: 'array', compression: true })
-  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-  return saveBlob(blob, `royaye-bita-report-${jIso(from).replace(/\//g, '-')}_${jIso(to).replace(/\//g, '-')}.xlsx`)
-}

@@ -2,11 +2,12 @@ import { useState } from 'react'
 import { supabase, errText, normPw, normUser, adminUsers } from '../lib/supabase'
 import { normalizeFa } from '../lib/fmt'
 import { Button, Field, useToast } from '../components/ui'
-import { ROLE } from './People'
+import { useAccess, can } from '../lib/access'
 
 /** Any role: change own display name, username and password. */
-export default function Account({ profile, onChanged }) {
+export default function Account({ profile, onChanged, onPurge }) {
   const toast = useToast()
+  const access = useAccess()
   const [name, setName] = useState(profile.full_name)
   const [user, setUser] = useState(profile.username)
   const [p1, setP1] = useState('')
@@ -43,7 +44,7 @@ export default function Account({ profile, onChanged }) {
         <div className="avatar xl">{profile.full_name.trim()[0]}</div>
         <div>
           <h1>{profile.full_name}</h1>
-          <p className="muted"><span dir="ltr">{profile.username}</span> · {ROLE[profile.role]}</p>
+          <p className="muted"><span dir="ltr">{profile.username}</span> · {access.role}</p>
         </div>
       </div>
 
@@ -67,6 +68,7 @@ export default function Account({ profile, onChanged }) {
         </div>
       </section>
 
+      {can(access, 'data_purge') && onPurge && <Button variant="ghost" icon="trash" className="btn-block" onClick={onPurge}>پاک‌سازی داده‌ها</Button>}
       <Button variant="ghost-danger" icon="logout" className="btn-block" onClick={() => supabase.auth.signOut()}>خروج از حساب</Button>
     </div>
   )
