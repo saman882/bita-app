@@ -19,8 +19,14 @@ window.addEventListener('vite:preloadError', (e) => {
   sessionStorage.setItem('bita-reloaded', '1')
   location.reload()
 })
-window.addEventListener('load', () => setTimeout(() => sessionStorage.removeItem('bita-reloaded'), 10000))
+window.addEventListener('load', () => setTimeout(() => { sessionStorage.removeItem('bita-reloaded'); sessionStorage.removeItem('bita-updated') }, 10000))
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {}))
+  window.addEventListener('load', () => navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { updateViaCache: 'none' }).then((r) => r.update()).catch(() => {}))
+  // The service worker found a newer release while an older cached page was shown: reload once.
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data !== 'bita-update' || sessionStorage.getItem('bita-updated')) return
+    sessionStorage.setItem('bita-updated', '1')
+    location.reload()
+  })
 }
