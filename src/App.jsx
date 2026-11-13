@@ -55,6 +55,7 @@ function Root() {
     setAccess(a.data)
   }, [uid])
   useEffect(() => { loadProfile() }, [loadProfile])
+  useEffect(() => { if (uid) checkVersion() }, [uid])
 
   if (session === undefined) return <Splash />
   if (!session) return <Login />
@@ -70,6 +71,21 @@ function Root() {
       <Shell profile={profile} reloadProfile={loadProfile} />
     </AccessCtx.Provider>
   )
+}
+
+// The database records the latest released build. A device still running an older cached copy
+// drops its offline cache and reloads once, so it never stays on old code.
+async function checkVersion() {
+  if (__BUILD__ === 'dev') return
+  const { data } = await supabase.from('app_settings').select('value').eq('key', 'app_version').maybeSingle()
+  const latest = data?.value?.build
+  if (!latest || latest === __BUILD__) return
+  const tried = sessionStorage.getItem('bita-ver')
+  if (tried === latest) return
+  sessionStorage.setItem('bita-ver', latest)
+  try { for (const r of (await navigator.serviceWorker?.getRegistrations()) || []) await r.unregister() } catch (e) { /* ignore */ }
+  try { for (const k of await caches.keys()) await caches.delete(k) } catch (e) { /* ignore */ }
+  location.reload()
 }
 
 const Splash = () => (

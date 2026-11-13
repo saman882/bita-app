@@ -5,4 +5,5 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   base: process.env.BASE || '/',
   plugins: [react()],
+  define: { __BUILD__: JSON.stringify(process.env.BUILD_ID || 'dev') },
 })
