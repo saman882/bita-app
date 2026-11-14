@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>رویای بیتا — به‌روزرسانی</title>
+</head>
+<body style="font-family:Tahoma,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#f3f4fa;color:#171a2e;text-align:center;padding:24px">
+<div>
+  <h2>در حال پاک کردن نسخهٔ قدیمی…</h2>
+  <p id="msg">چند ثانیه صبر کنید؛ بعد خودکار به برنامه می‌روید.</p>
+</div>
+<script>
+(async function () {
+  try { var r = await navigator.serviceWorker.getRegistrations(); for (var i = 0; i < r.length; i++) await r[i].unregister() } catch (e) {}
+  try { var k = await caches.keys(); for (var j = 0; j < k.length; j++) await caches.delete(k[j]) } catch (e) {}
+  document.getElementById('msg').textContent = 'انجام شد. در حال باز کردن برنامه…'
+  setTimeout(function () { location.replace('/?r=' + Date.now()) }, 1200)
+})()
+</script>
+</body>
+</html>
