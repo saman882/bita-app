@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { supabase, errText } from './lib/supabase'
 import { syncServerClock } from './lib/clock'
 import { AccessCtx, useAccess, can } from './lib/access'
-import { Icon, Spinner, ToastProvider, Button } from './components/ui'
+import { Icon, Spinner, ToastProvider, Button, Credit } from './components/ui'
 import Login from './pages/Login'
 import Account from './pages/Account'
 import Entry from './pages/Entry'
@@ -128,6 +128,7 @@ function Shell({ profile, reloadProfile }) {
           ))}
         </nav>
         <div className="side-user"><div className="avatar">{profile.full_name.trim()[0]}</div><div><b>{profile.full_name}</b><small className="muted">{access.role}</small></div></div>
+        <Credit />
       </aside>
 
       <main className="main">

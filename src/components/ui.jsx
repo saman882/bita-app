@@ -275,3 +275,13 @@ export const SearchBox = ({ value, onChange, placeholder = 'جستجو…' }) =>
     {value && <button className="icon-btn eye" onClick={() => onChange('')} aria-label="پاک کردن"><Icon name="x" size={16} /></button>}
   </div>
 )
+
+// Developer credit (login page, sidebar, account page)
+export function Credit({ className = '' }) {
+  return (
+    <a className={`credit ${className}`} href="https://pistacode.ir" target="_blank" rel="noopener noreferrer">
+      <img src={`${import.meta.env.BASE_URL}pistacode.png`} alt="" width="22" height="22" />
+      <span>طراحی و توسعه: <b dir="ltr">pistacode.ir</b></span>
+    </a>
+  )
+}

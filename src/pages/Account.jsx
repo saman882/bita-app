@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { supabase, errText, normPw, normUser, adminUsers } from '../lib/supabase'
 import { normalizeFa } from '../lib/fmt'
-import { Button, Field, useToast } from '../components/ui'
+import { Button, Field, useToast, Credit } from '../components/ui'
 import { useAccess, can } from '../lib/access'
 
 /** Any role: change own display name, username and password. */
@@ -70,6 +70,7 @@ export default function Account({ profile, onChanged, onPurge }) {
 
       {can(access, 'data_purge') && onPurge && <Button variant="ghost" icon="trash" className="btn-block" onClick={onPurge}>پاک‌سازی داده‌ها</Button>}
       <Button variant="ghost-danger" icon="logout" className="btn-block" onClick={() => supabase.auth.signOut()}>خروج از حساب</Button>
+      <Credit className="credit-center" />
     </div>
   )
 }

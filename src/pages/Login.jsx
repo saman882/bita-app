@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { supabase, usernameToEmail, errText, normPw } from '../lib/supabase'
-import { Icon, Spinner } from '../components/ui'
+import { Icon, Spinner, Credit } from '../components/ui'
 
 export default function Login() {
   const [u, setU] = useState('')
@@ -49,6 +49,7 @@ export default function Login() {
           {busy ? <Spinner /> : <Icon name="login" size={18} />}<span>ورود</span>
         </button>
       </form>
+      <Credit className="credit-login" />
     </div>
   )
 }

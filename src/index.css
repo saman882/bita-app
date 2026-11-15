@@ -494,7 +494,7 @@ tr.clickable { cursor: pointer; } tr.clickable:hover td { background: var(--soft
 .live-foot { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: .82rem; }
 
 /* login */
-.login { min-height: 100dvh; display: grid; place-items: center; padding: 20px; position: relative; overflow: hidden; }
+.login { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 20px; position: relative; overflow: hidden; }
 .login-bg { position: absolute; inset: 0; z-index: 0; background: linear-gradient(160deg, #1c1760, #3b2fc9 55%, #6d5cff); }
 .blob { position: absolute; border-radius: 50%; filter: blur(60px); opacity: .55; animation: drift 12s ease-in-out infinite alternate; }
 .b1 { width: 340px; height: 340px; background: #f59e0b; top: -80px; inset-inline-end: -60px; }
@@ -733,3 +733,13 @@ fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
 .share-bar { height: 12px; border-radius: 99px; background: var(--soft); overflow: hidden; margin: 4px 0; }
 .share-bar span { display: block; height: 100%; border-radius: 99px; }
 .card-head > div:first-child { display: flex; flex-direction: column; line-height: 1.5; }
+
+/* Developer credit */
+.credit { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: .78rem; text-decoration: none; padding: 6px 8px; border-radius: 10px; transition: background .15s, color .15s; }
+.credit img { width: 22px; height: 22px; border-radius: 6px; flex: none; }
+.credit b { font-weight: 600; letter-spacing: .2px; }
+.credit:hover { color: var(--text); background: var(--surface-2, rgba(0,0,0,.04)); }
+.side .credit { margin-top: -12px; align-self: flex-start; }
+.credit-center { display: flex; justify-content: center; margin: 4px auto 0; }
+.credit-login { position: relative; z-index: 1; color: rgba(255,255,255,.75); }
+.credit-login:hover { color: #fff; background: rgba(255,255,255,.1); }
