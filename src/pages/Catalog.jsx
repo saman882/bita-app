@@ -57,7 +57,7 @@ function useSave(reload) {
     const { error } = await fn()
     setBusy(false)
     if (error) {
-      toast(/duplicate|unique/i.test(error.message) ? 'این نام قبلاً ثبت شده است' : /foreign key/i.test(error.message) ? 'این مورد در سوابق استفاده شده؛ به‌جای حذف، غیرفعالش کنید' : errText(error), 'bad')
+      toast(/code_key/i.test(error.message) ? 'این کد کالا قبلاً برای کالای دیگری ثبت شده است' : /duplicate|unique/i.test(error.message) ? 'این نام قبلاً ثبت شده است' : /foreign key/i.test(error.message) ? 'این مورد در سوابق استفاده شده؛ به‌جای حذف، غیرفعالش کنید' : errText(error), 'bad')
       return false
     }
     toast(ok); reload(); return true
@@ -79,7 +79,7 @@ function Products({ d, reload }) {
   }, [d.products, q, typeF])
 
   const save = async () => {
-    const row = { name: normalizeFa(edit.name).replace(/\s+/g, ' ').trim(), type_id: Number(edit.type_id), active: edit.active, price: Number(toEn(edit.price || 0)) || 0 }
+    const row = { name: normalizeFa(edit.name).replace(/\s+/g, ' ').trim(), type_id: Number(edit.type_id), active: edit.active, price: Number(toEn(edit.price || 0)) || 0, code: toEn(edit.code || '').trim() || null }
     if (!row.name) return
     const ok = await run(() => edit.id ? supabase.from('products').update(row).eq('id', edit.id) : supabase.from('products').insert(row), edit.id ? 'محصول ذخیره شد' : 'محصول اضافه شد')
     if (ok) setEdit(null)
@@ -103,7 +103,7 @@ function Products({ d, reload }) {
               <span className="stage-swatch sm" style={{ background: 'var(--brand)' }} />
               <div className="grow">
                 <b>{p.name} {!p.active && <span className="badge badge-soft">غیرفعال</span>}</b>
-                <small className="muted">{typeName[p.type_id]}{Number(p.price) > 0 ? ` · ${money(p.price)}` : ''}{d.used.products?.[p.id] ? ` · ${fa(d.used.products[p.id])} بار ثبت شده` : ''}</small>
+                <small className="muted">{p.code && <>کد {fa(p.code)} · </>}{typeName[p.type_id]}{Number(p.price) > 0 ? ` · ${money(p.price)}` : ''}{d.used.products?.[p.id] ? ` · ${fa(d.used.products[p.id])} بار ثبت شده` : ''}</small>
               </div>
               <Icon name="edit" size={18} className="muted" />
             </button>
@@ -117,7 +117,8 @@ function Products({ d, reload }) {
         {edit && (
           <div className="form">
             <Field label="نام محصول"><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="مثلاً شلنگ پکیج یکسرمغزی 1/2*1/2 50سانتی" autoFocus={!edit.id} /></Field>
-            <Field label="قیمت فروش هر عدد (تومان)" hint="در ثبت فروش به‌صورت پیش‌فرض پر می‌شود و قابل تغییر است."><NumInput value={String(edit.price ?? '')} onChange={(v) => setEdit({ ...edit, price: v })} placeholder="۰" /></Field>
+            <Field label="کد کالا در نرم‌افزار حسابداری" hint="برای تطبیق فاکتورهای اکسل؛ اگر خالی باشد با نام کالا تطبیق داده می‌شود."><input className="input" dir="ltr" inputMode="numeric" value={fa(edit.code || '')} onChange={(e) => setEdit({ ...edit, code: toEn(e.target.value) })} /></Field>
+            <Field label="قیمت فروش هر عدد (ریال)" hint="در ثبت فروش به‌صورت پیش‌فرض پر می‌شود و قابل تغییر است."><NumInput value={String(edit.price ?? '')} onChange={(v) => setEdit({ ...edit, price: v })} placeholder="۰" /></Field>
             <Field label="گروه (نوع) محصول" hint="زمان استاندارد هر عملیات بر اساس نوع محصول تعیین می‌شود.">
               <select className="input" value={edit.type_id} onChange={(e) => setEdit({ ...edit, type_id: e.target.value })}>
                 {d.types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}

@@ -39,7 +39,7 @@ export default function Purge() {
   return (
     <div className="page">
       <div className="page-title"><h1>پاک‌سازی داده‌ها</h1></div>
-      <div className="banner banner-warn"><Icon name="alert" /><div>اطلاعات پایه (کارکنان، محصولات، عملیات‌ها، زمان‌های استاندارد، مشتریان و حساب‌ها) پاک نمی‌شود؛ فقط داده‌های ثبت‌شدهٔ روزانه.<small>پاک‌سازی برگشت‌پذیر نیست. اگر لازم دارید، قبلش از گزارش‌ها خروجی اکسل بگیرید.</small></div></div>
+      <div className="banner banner-warn"><Icon name="alert" /><div>اطلاعات پایه (همکاران، محصولات، عملیات‌ها، زمان‌های استاندارد، مشتریان و حساب‌ها) پاک نمی‌شود؛ فقط داده‌های ثبت‌شدهٔ روزانه.<small>پاک‌سازی برگشت‌پذیر نیست. اگر لازم دارید، قبلش از گزارش‌ها خروجی اکسل بگیرید.</small></div></div>
 
       <section className="card">
         <div className="card-head"><h2>بازهٔ زمانی</h2></div>

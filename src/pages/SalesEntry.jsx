@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, errText } from '../lib/supabase'
-import { fa, num, toEn } from '../lib/fmt'
-import { Icon, Button, Sheet, Field, NumInput, Empty, Spinner, useToast, SearchSelect } from '../components/ui'
+import { fa, num, toEn, jDate, tehranIso } from '../lib/fmt'
+import { readInvoiceFile } from '../lib/invoiceXls'
+import { Icon, Button, Sheet, Field, NumInput, Empty, Spinner, useToast, SearchSelect, JDateInput } from '../components/ui'
 import { DatePicker, useCatalog } from './Entry'
 
-export const money = (v) => `${num(Math.round(Number(v) || 0))} تومان`
+export const money = (v) => `${num(Math.round(Number(v) || 0))} ریال`
 
 export function useCustomers() {
   const [list, setList] = useState([])
@@ -28,6 +29,7 @@ export default function SalesEntry({ date, setDate }) {
   const [busy, setBusy] = useState(false)
   const [edit, setEdit] = useState(null)
   const [delId, setDelId] = useState(null)
+  const [importing, setImporting] = useState(false)
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.rpc('sales_day', { p_date: date })
@@ -79,6 +81,14 @@ export default function SalesEntry({ date, setDate }) {
     <>
       <DatePicker date={date} setDate={setDate} kind="sales" extra={rows ? `${fa(rows.length)} قلم · ${num(dayQty)} عدد · ${money(dayAmount)}` : ''} />
 
+      <section className="card import-card">
+        <div className="card-head">
+          <div><h2>ورود فاکتور از اکسل</h2><small className="muted">خروجی «فاکتور فروش» نرم‌افزار حسابداری (SaleFactorRpt)؛ چند فایل با هم هم می‌شود.</small></div>
+          <Button icon="upload" onClick={() => setImporting(true)}>انتخاب فایل</Button>
+        </div>
+      </section>
+      {importing && <ImportInvoices date={date} onClose={() => setImporting(false)} onDone={(d) => { setImporting(false); if (d && d !== date) setDate(d); else load() }} />}
+
       <section className="card">
         <div className="card-head"><h2>ثبت فروش جدید</h2></div>
         {customers.length === 0 ? (
@@ -94,7 +104,7 @@ export default function SalesEntry({ date, setDate }) {
                     onChange={(v) => setLine(l.key, { product: v, price: l.price === '' || l.price === String(priceOf(l.product)) ? String(priceOf(v)) : l.price })} />
                   <div className="grid2">
                     <label className="field"><span className="field-label">تعداد</span><NumInput value={l.qty} onChange={(v) => setLine(l.key, { qty: v })} placeholder="۰" /></label>
-                    <label className="field"><span className="field-label">قیمت واحد (تومان)</span><NumInput value={l.price} onChange={(v) => setLine(l.key, { price: v })} placeholder="۰" /></label>
+                    <label className="field"><span className="field-label">قیمت واحد (ریال)</span><NumInput value={l.price} onChange={(v) => setLine(l.key, { price: v })} placeholder="۰" /></label>
                   </div>
                   {Number(l.qty) > 0 && Number(l.price) > 0 && <small className="muted">جمع: {money(Number(l.qty) * Number(l.price))}</small>}
                 </div>
@@ -115,7 +125,7 @@ export default function SalesEntry({ date, setDate }) {
               const q = c.items.reduce((s, r) => s + Number(r.quantity), 0), a = c.items.reduce((s, r) => s + Number(r.quantity) * Number(r.unit_price), 0)
               return (
                 <div key={c.id} className="day open">
-                  <div className="day-head static"><div><b>{c.name}</b><small className="muted">کد {fa(c.code)} · {fa(c.items.length)} قلم · {num(q)} عدد</small></div><b>{money(a)}</b></div>
+                  <div className="day-head static"><div><b>{c.name}</b>{[...new Set(c.items.map((r) => r.invoice_no).filter(Boolean))].map((n) => <span key={n} className="badge badge-soft">فاکتور {fa(n)}</span>)}<small className="muted">کد {fa(c.code)} · {fa(c.items.length)} قلم · {num(q)} عدد</small></div><b>{money(a)}</b></div>
                   <div className="day-body">
                     {c.items.map((r) => (
                       <div key={r.id} className="job">
@@ -165,10 +175,95 @@ function SaleEditor({ sale, date, customers, products, onClose, onSaved }) {
         <Field label="محصول"><SearchSelect label="محصول" items={products} value={f.product_id} onChange={(v) => setF({ ...f, product_id: v })} group="type" /></Field>
         <div className="grid2">
           <Field label="تعداد"><NumInput value={f.qty} onChange={(v) => setF({ ...f, qty: v })} /></Field>
-          <Field label="قیمت واحد (تومان)"><NumInput value={f.price} onChange={(v) => setF({ ...f, price: v })} /></Field>
+          <Field label="قیمت واحد (ریال)"><NumInput value={f.price} onChange={(v) => setF({ ...f, price: v })} /></Field>
         </div>
         <Field label="توضیح"><input className="input" value={f.note || ''} onChange={(e) => setF({ ...f, note: e.target.value })} /></Field>
       </div>
+    </Sheet>
+  )
+}
+
+/* ---------- Excel invoice import ---------- */
+function ImportInvoices({ date, onClose, onDone }) {
+  const toast = useToast()
+  const [items, setItems] = useState(null)
+  const [reading, setReading] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+
+  const pick = async (files) => {
+    if (!files?.length) return
+    setReading(true)
+    const out = [], bad = []
+    for (const f of files) {
+      try {
+        const inv = await readInvoiceFile(f)
+        if (!inv.length) bad.push(f.name)
+        for (const i of inv) out.push({ ...i, key: `${f.name}|${i.sheet}|${i.invoice_no}`, date: i.date || date, dateFromFile: !!i.date })
+      } catch { bad.push(f.name) }
+    }
+    setReading(false)
+    if (bad.length) toast(`این فایل‌ها با قالب فاکتور فروش خوانده نشدند: ${bad.join('، ')}`, 'bad')
+    setItems(out)
+  }
+  const setDate = (key, d) => setItems((xs) => xs.map((x) => (x.key === key ? { ...x, date: d } : x)))
+  const run = async () => {
+    setBusy(true)
+    const res = []
+    for (const inv of items) {
+      const { data, error } = await supabase.rpc('import_sale_invoice', { p: { invoice_no: inv.invoice_no, date: inv.date, time: inv.time, customer: inv.customer, lines: inv.lines } })
+      res.push({ inv, data, error: error ? errText(error) : null })
+    }
+    setBusy(false)
+    setResult(res)
+  }
+  const lastDate = items?.length ? items[items.length - 1].date : null
+
+  return (
+    <Sheet open onClose={() => (result ? onDone(lastDate) : onClose())} title="ورود فاکتور فروش از اکسل"
+      footer={result ? <Button className="btn-block" icon="check" onClick={() => onDone(lastDate)}>بستن</Button>
+        : items?.length ? <Button className="btn-block btn-lg" icon="check" loading={busy} onClick={run}>ثبت {fa(items.length)} فاکتور</Button> : null}>
+      {result ? (
+        <div className="form">
+          {result.map(({ inv, data, error }) => (
+            <div key={inv.key} className={`imp-res ${error || !data ? 'bad' : 'ok'}`}>
+              <b>فاکتور {fa(inv.invoice_no || '—')} · {inv.customer.name}</b>
+              {error || !data ? <small className="tone-bad">{error || 'ثبت نشد'}</small> : (
+                <small className="muted">
+                  {fa(data.lines)} ردیف ثبت شد{data.replaced ? ' (جایگزین نسخهٔ قبلی همین فاکتور)' : ''}{data.new_customer ? ' · مشتری جدید ساخته شد' : ''}
+                  {data.new_products?.length > 0 && <> · کالای جدید در گروه «سایر»: {data.new_products.join('، ')}</>}
+                </small>
+              )}
+            </div>
+          ))}
+          {result.some((r) => r.data?.new_products?.length) && <p className="muted small">گروه کالاهای جدید را از «اطلاعات پایه ← محصولات و عملیات» درست کنید تا در گزارش‌ها در گروه درست بیایند.</p>}
+        </div>
+      ) : (
+        <div className="form">
+          <label className="file-drop">
+            <input type="file" accept=".xls,.xlsx" multiple onChange={(e) => pick([...e.target.files])} />
+            <Icon name="upload" size={26} />
+            <b>{reading ? 'در حال خواندن…' : 'فایل‌های اکسل فاکتور را انتخاب کنید'}</b>
+            <small className="muted">.xls یا .xlsx · اگر شمارهٔ فاکتوری قبلاً وارد شده باشد، ردیف‌هایش جایگزین می‌شود و تکراری ثبت نمی‌شود.</small>
+          </label>
+          {items?.length === 0 && <p className="muted">فاکتوری پیدا نشد.</p>}
+          {items?.map((inv) => {
+            const total = inv.lines.reduce((s, l) => s + l.qty * l.price, 0)
+            return (
+              <div key={inv.key} className="imp-inv">
+                <div className="imp-inv-head"><b>فاکتور {fa(inv.invoice_no || '—')}</b><span className="muted small">{inv.file}</span></div>
+                <small className="muted">خریدار: {inv.customer.name}{inv.time && ` · ساعت ${fa(inv.time)}`}</small>
+                <ul className="imp-lines">{inv.lines.map((l, i) => <li key={i}><span>{l.name} <small className="muted">({fa(l.code)})</small></span><span>{num(l.qty)} × {money(l.price)}</span></li>)}</ul>
+                <div className="imp-inv-foot">
+                  <span>جمع: <b>{money(total)}</b></span>
+                  <div className="imp-date"><span className="muted small">{inv.dateFromFile ? 'تاریخ فاکتور' : 'تاریخ (در فایل نیست)'}</span>
+                    <JDateInput value={inv.date} onChange={(v) => setDate(inv.key, v > tehranIso() ? tehranIso() : v)} label="تاریخ فاکتور" /></div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </Sheet>
   )
 }

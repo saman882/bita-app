@@ -743,3 +743,39 @@ fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
 .credit-center { display: flex; justify-content: center; margin: 4px auto 0; }
 .credit-login { position: relative; z-index: 1; color: rgba(255,255,255,.75); }
 .credit-login:hover { color: #fff; background: rgba(255,255,255,.1); }
+
+/* v5: breaks list, operations list */
+.tpair:has(> .icon-btn) { grid-template-columns: 88px 1fr auto 1fr 32px; }
+.icon-btn.sm { width: 32px; height: 32px; min-width: 32px; }
+.add-break { display: inline-flex; align-items: center; gap: 4px; margin-top: 2px; }
+.break-edit { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--soft); }
+.break-edit-top { display: flex; gap: 8px; align-items: center; }
+.break-edit-top .input { flex: 1; }
+.check { display: flex; align-items: center; gap: 8px; font-size: .88rem; }
+.check input { width: 18px; height: 18px; accent-color: var(--brand); }
+button.erow.op-person { text-align: start; color: var(--text); cursor: pointer; }
+button.erow.op-person:hover { border-color: var(--brand); }
+.file-drop { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding: 22px 16px; border: 2px dashed var(--line); border-radius: 16px; background: var(--soft); cursor: pointer; color: var(--brand); }
+.file-drop b { color: var(--text); }
+.file-drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.imp-inv { border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.imp-inv-head, .imp-inv-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.imp-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: .88rem; }
+.imp-lines li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; background: var(--soft); border-radius: 8px; }
+.imp-date { display: flex; flex-direction: column; gap: 2px; }
+.imp-res { padding: 10px 12px; border-radius: 12px; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); }
+.imp-res.ok { border-color: var(--good); }
+.imp-res.bad { border-color: var(--bad); }
+.import-card .card-head { margin-bottom: 0; }
+.contacts { display: flex; flex-direction: column; gap: 8px; }
+.contact-row { display: grid; grid-template-columns: 1fr 1fr 40px; gap: 6px; align-items: center; }
+.cell2 { display: flex; flex-direction: column; line-height: 1.4; }
+.cell2 small { color: var(--muted); font-size: .75rem; }
+.op-groups { margin-bottom: 10px; }
+.dash .kpis { margin-bottom: 8px; }
+.dash-grid { display: grid; gap: 16px; }
+@media (min-width: 900px) { .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.dash .card-head h2 { display: flex; align-items: center; gap: 8px; }
+.support-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.support-links .btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
+.share-bar { direction: ltr; }

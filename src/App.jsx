@@ -11,9 +11,11 @@ import Purge from './pages/Purge'
 import { Users } from './pages/People'
 
 const Reports = lazy(() => import('./pages/Reports'))
+const Dashboard = lazy(() => import('./pages/Reports').then((m) => ({ default: m.Dashboard })))
 
 /** Tabs in display order; each is shown only with one of the listed permissions. */
 const ALL_TABS = [
+  { id: 'dashboard', label: 'داشبورد', short: 'خانه', icon: 'home', perms: ['reports_staff', 'reports_production', 'reports_sales'] },
   { id: 'reports', label: 'گزارش‌ها', icon: 'chart', perms: ['reports_staff', 'reports_production', 'reports_sales'] },
   { id: 'entry', label: 'ثبت روزانه', short: 'ثبت', icon: 'cal', perms: ['entry_production', 'entry_sales'] },
   { id: 'base', label: 'اطلاعات پایه', short: 'اطلاعات', icon: 'box' },
@@ -101,6 +103,7 @@ function Shell({ profile, reloadProfile }) {
   })
   const [workers, setWorkers] = useState([])
   const [navKey, setNavKey] = useState(0)
+  const [reportTab, setReportTab] = useState(null)
 
   const loadWorkers = useCallback(async () => {
     const { data } = await supabase.from('workers').select('*').order('full_name')
@@ -108,7 +111,8 @@ function Shell({ profile, reloadProfile }) {
   }, [])
   useEffect(() => { loadWorkers() }, [loadWorkers])
 
-  const go = (id) => {
+  const go = (id, sub = null) => {
+    setReportTab(sub)
     setTab(id)
     setNavKey((k) => k + 1) // re-open a section from its start (e.g. back to the base-info hub)
     history.replaceState(null, '', '#' + id)
@@ -137,7 +141,8 @@ function Shell({ profile, reloadProfile }) {
           <button className="avatar sm" aria-label="حساب من" onClick={() => go('account')}>{profile.full_name.trim()[0]}</button>
         </header>
         <div key={`${tab}-${navKey}`} className="view">
-          {tab === 'reports' && <Suspense fallback={<div className="page-center"><Spinner size={28} /></div>}><Reports workers={workers} /></Suspense>}
+          {tab === 'dashboard' && <Suspense fallback={<div className="page-center"><Spinner size={28} /></div>}><Dashboard onOpen={(t) => go('reports', t)} /></Suspense>}
+          {tab === 'reports' && <Suspense fallback={<div className="page-center"><Spinner size={28} /></div>}><Reports workers={workers} initialTab={reportTab} /></Suspense>}
           {tab === 'entry' && <Entry />}
           {tab === 'base' && <BaseInfo workers={workers} reloadWorkers={loadWorkers} me={profile} />}
           {tab === 'users' && can(access, 'users') && <Users me={profile} onMeChanged={reloadProfile} />}

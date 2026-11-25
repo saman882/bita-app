@@ -44,9 +44,15 @@ export const isoFromJ = (jy, jm, jd) => {
 }
 export const jMonthLen = jalaaliMonthLength
 
+/** Jalali date "۱۴۰۵/۰۸/۱۵" (year/month/day), kept left-to-right inside Persian text. */
 export const jDate = (iso) => {
   const { jy, jm, jd } = jParts(iso)
-  return fa(`${jy}/${pad(jm)}/${pad(jd)}`)
+  return `\u2066${fa(`${jy}/${pad(jm)}/${pad(jd)}`)}\u2069`
+}
+/** Short chart label "۰۸/۱۵" (month/day). */
+export const jMd = (iso) => {
+  const { jm, jd } = jParts(iso)
+  return fa(`${pad(jm)}/${pad(jd)}`)
 }
 export const jDateLong = (iso) => {
   const { jy, jm, jd } = jParts(iso)

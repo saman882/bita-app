@@ -6,14 +6,14 @@ import Catalog from './Catalog'
 import Customers from './Customers'
 import { Workers } from './People'
 
-/** اطلاعات پایه: کارکنان، محصولات و عملیات، مشتریان */
+/** اطلاعات پایه: همکاران، محصولات و عملیات، مشتریان */
 export default function BaseInfo({ workers, reloadWorkers, me }) {
   const access = useAccess()
   const [section, setSection] = useState(null)
   const back = () => setSection(null)
 
   const cards = [
-    { id: 'staff', title: 'کارکنان', text: 'همکاران، کد پرسنلی و وضعیت', icon: 'users', meta: `${fa(workers.filter((w) => w.active).length)} همکار فعال`, show: true },
+    { id: 'staff', title: 'همکاران', text: 'همکاران، کد پرسنلی و وضعیت', icon: 'users', meta: `${fa(workers.filter((w) => w.active).length)} همکار فعال`, show: true },
     { id: 'catalog', title: 'محصولات و عملیات', text: 'انواع محصول، محصولات، عملیات‌ها و زمان استاندارد', icon: 'box', show: can(access, 'catalog', 'standards') },
     { id: 'customers', title: 'مشتریان', text: 'کد مشتری، نام، آدرس و لوکیشن', icon: 'pin', show: can(access, 'customers', 'entry_sales') },
   ].filter((c) => c.show)

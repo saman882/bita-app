@@ -5,7 +5,7 @@ import { fa, toEn, normalizeFa } from '../lib/fmt'
 import { Icon, Button, Sheet, Field, NumInput, Empty, useToast, SearchBox } from '../components/ui'
 
 /* =====================================================================
-   کارکنان (no login) — add/edit with `staff`, delete with `staff_delete`
+   همکاران (no login) — add/edit with `staff`, delete with `staff_delete`
    ===================================================================== */
 const emptyWorker = { full_name: '', personnel_code: '', active: true }
 
@@ -44,7 +44,7 @@ export function Workers({ workers, reload, me, onBack }) {
   return (
     <div className="page">
       <div className="page-title">
-        <h1>کارکنان</h1>
+        <h1>همکاران</h1>
         <div className="row-gap">
           {onBack && <Button variant="ghost" icon="chev" onClick={onBack}>اطلاعات پایه</Button>}
           {canEdit && <Button icon="plus" onClick={() => setEdit({ ...emptyWorker })}>همکار جدید</Button>}
@@ -76,7 +76,7 @@ export function Workers({ workers, reload, me, onBack }) {
           <div className="form">
             <Field label="نام همکار"><input className="input" value={edit.full_name} onChange={(e) => setEdit({ ...edit, full_name: e.target.value })} placeholder="مثلاً نظیری" autoFocus={isNew} /></Field>
             <Field label="کد پرسنلی (اختیاری)"><NumInput value={edit.personnel_code} onChange={(v) => setEdit({ ...edit, personnel_code: v })} /></Field>
-            <p className="muted small">ساعت ورود و خروج پیش‌فرض برای همهٔ کارکنان یکسان است و در «ثبت روزانه» قابل تغییر است.</p>
+            <p className="muted small">ساعت ورود و خروج پیش‌فرض برای همهٔ همکاران یکسان است و در «ثبت روزانه» قابل تغییر است.</p>
             {!isNew && (
               <Field label="وضعیت" hint="همکار غیرفعال در ثبت روزانه نمی‌آید؛ سوابقش می‌ماند.">
                 <select className="input" value={edit.active ? '1' : '0'} onChange={(e) => setEdit({ ...edit, active: e.target.value === '1' })}>

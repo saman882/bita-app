@@ -21,7 +21,7 @@ export const mapLinks = (lat, lng) => ({
   neshan: `https://neshan.org/maps/@${lat},${lng},16z`,
 })
 
-const empty = { code: '', first_name: '', last_name: '', phone: '', address: '', lat: null, lng: null, note: '', active: true }
+const empty = { code: '', first_name: '', last_name: '', phone: '', address: '', lat: null, lng: null, note: '', active: true, manager_name: '', manager_phone: '', contacts: [] }
 
 export default function Customers({ onBack }) {
   const toast = useToast()
@@ -44,13 +44,15 @@ export default function Customers({ onBack }) {
     const nums = list.map((c) => parseInt(c.code, 10)).filter((n) => !Number.isNaN(n))
     return String((nums.length ? Math.max(...nums) : 1000) + 1)
   }
-  const open = (c) => { setLoc(''); setEdit(c ? { ...c, phone: c.phone || '', address: c.address || '', note: c.note || '' } : { ...empty, code: nextCode() }) }
+  const open = (c) => { setLoc(''); setEdit(c ? { ...c, phone: c.phone || '', address: c.address || '', note: c.note || '', manager_name: c.manager_name || '', manager_phone: c.manager_phone || '', contacts: Array.isArray(c.contacts) ? c.contacts : [] } : { ...empty, code: nextCode() }) }
 
   const save = async () => {
     const row = {
       code: toEn(edit.code).trim(), first_name: normalizeFa(edit.first_name).trim(), last_name: normalizeFa(edit.last_name).trim(),
       phone: toEn(edit.phone).trim() || null, address: normalizeFa(edit.address).trim() || null, note: normalizeFa(edit.note).trim() || null,
       lat: edit.lat ?? null, lng: edit.lng ?? null, active: edit.active,
+      manager_name: normalizeFa(edit.manager_name).trim() || null, manager_phone: toEn(edit.manager_phone).trim() || null,
+      contacts: (edit.contacts || []).map((c) => ({ name: normalizeFa(c.name).trim(), phone: toEn(c.phone).trim() })).filter((c) => c.name || c.phone),
     }
     if (!row.code) return toast('کد مشتری را وارد کنید', 'bad')
     if (!row.first_name) return toast('نام مشتری را وارد کنید', 'bad')
@@ -91,7 +93,7 @@ export default function Customers({ onBack }) {
               <div className="code-badge">{fa(c.code)}</div>
               <div className="grow">
                 <b>{c.name} {!c.active && <span className="badge badge-soft">غیرفعال</span>}</b>
-                <small className="muted">{c.address || 'بدون آدرس'}{c.phone && <> · <span dir="ltr">{fa(c.phone)}</span></>}</small>
+                <small className="muted">{c.manager_name && <>مدیر: {c.manager_name} · </>}{c.address || 'بدون آدرس'}{c.phone && <> · <span dir="ltr">{fa(c.phone)}</span></>}</small>
               </div>
               {c.lat != null && <Icon name="pin" size={18} className="tone-good" />}
               <Icon name="edit" size={18} className="muted" />
@@ -108,12 +110,28 @@ export default function Customers({ onBack }) {
           <fieldset className="form plain" disabled={!editable}>
             <div className="grid2">
               <Field label="کد مشتری"><input className="input" dir="ltr" inputMode="numeric" value={fa(edit.code)} onChange={(e) => setEdit({ ...edit, code: toEn(e.target.value) })} /></Field>
-              <Field label="تلفن (اختیاری)"><input className="input" dir="ltr" inputMode="tel" value={fa(edit.phone)} onChange={(e) => setEdit({ ...edit, phone: toEn(e.target.value) })} /></Field>
+              <Field label="تلفن مشتری"><input className="input" dir="ltr" inputMode="tel" value={fa(edit.phone)} onChange={(e) => setEdit({ ...edit, phone: toEn(e.target.value) })} /></Field>
             </div>
             <div className="grid2">
-              <Field label="نام"><input className="input" value={edit.first_name} onChange={(e) => setEdit({ ...edit, first_name: e.target.value })} autoFocus={isNew} /></Field>
-              <Field label="نام خانوادگی"><input className="input" value={edit.last_name} onChange={(e) => setEdit({ ...edit, last_name: e.target.value })} /></Field>
+              <Field label="نام مشتری / فروشگاه"><input className="input" value={edit.first_name} onChange={(e) => setEdit({ ...edit, first_name: e.target.value })} autoFocus={isNew} /></Field>
+              <Field label="نام خانوادگی (اختیاری)"><input className="input" value={edit.last_name} onChange={(e) => setEdit({ ...edit, last_name: e.target.value })} /></Field>
             </div>
+            <div className="grid2">
+              <Field label="نام مدیر"><input className="input" value={edit.manager_name} onChange={(e) => setEdit({ ...edit, manager_name: e.target.value })} /></Field>
+              <Field label="تلفن مدیر"><input className="input" dir="ltr" inputMode="tel" value={fa(edit.manager_phone)} onChange={(e) => setEdit({ ...edit, manager_phone: toEn(e.target.value) })} /></Field>
+            </div>
+            <Field label="افراد مخاطب">
+              <div className="contacts">
+                {edit.contacts.map((c, i) => (
+                  <div key={i} className="contact-row">
+                    <input className="input" placeholder="نام مخاطب" value={c.name} onChange={(e) => setEdit({ ...edit, contacts: edit.contacts.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
+                    <input className="input" dir="ltr" inputMode="tel" placeholder="تلفن" value={fa(c.phone)} onChange={(e) => setEdit({ ...edit, contacts: edit.contacts.map((x, j) => (j === i ? { ...x, phone: toEn(e.target.value) } : x)) })} />
+                    <button type="button" className="icon-btn" aria-label="حذف مخاطب" onClick={() => setEdit({ ...edit, contacts: edit.contacts.filter((_, j) => j !== i) })}><Icon name="x" size={16} /></button>
+                  </div>
+                ))}
+                <Button type="button" variant="ghost" icon="plus" onClick={() => setEdit({ ...edit, contacts: [...edit.contacts, { name: '', phone: '' }] })}>افزودن مخاطب</Button>
+              </div>
+            </Field>
             <Field label="آدرس"><textarea className="input textarea" rows={2} value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} /></Field>
 
             <Field label="لوکیشن" hint="روی نقشه بزنید، یا «موقعیت من» را بزنید، یا لینک گوگل‌مپ/نشان را بچسبانید.">
