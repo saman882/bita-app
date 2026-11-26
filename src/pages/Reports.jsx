@@ -578,19 +578,25 @@ function SalesReport({ range, types }) {
 
 
 /* ================================ DASHBOARD ================================ */
-const DASH_PRESETS = [['today', 'امروز'], ['week', 'این هفته'], ['month', 'این ماه'], ['year', 'امسال']]
+const DASH_PRESETS = [['today', 'امروز'], ['week', 'این هفته'], ['month', 'این ماه'], ['lastmonth', 'ماه قبل'], ['90', '۳ ماه اخیر'], ['year', 'امسال']]
 
 /** First page after login: a summary of sales, production and colleagues for the chosen period. */
 export function Dashboard({ onOpen }) {
   const access = useAccess()
-  const [preset, setPreset] = useState('month')
-  const range = useMemo(() => presetRange(preset), [preset])
+  const [preset, setPreset] = useState('year')
+  const [range, setRange] = useState(() => presetRange('year'))
+  const [from, to] = range
   const showSales = can(access, 'reports_sales'), showProd = can(access, 'reports_production'), showStaff = can(access, 'reports_staff')
   return (
     <div className="page">
       <div className="page-title"><h1>داشبورد</h1></div>
-      <div className="card filters"><div className="chips">{DASH_PRESETS.map(([k, l]) => <button key={k} className={`chip ${preset === k ? 'on' : ''}`} onClick={() => setPreset(k)}>{l}</button>)}</div>
-        <small className="muted">از {jDate(range[0])} تا {jDate(range[1])}</small></div>
+      <div className="card filters">
+        <div className="chips">{DASH_PRESETS.map(([k, l]) => <button key={k} className={`chip ${preset === k ? 'on' : ''}`} onClick={() => { setPreset(k); setRange(presetRange(k)) }}>{l}</button>)}</div>
+        <div className="range">
+          <div><span className="muted small">از</span><JDateInput value={from} onChange={(v) => { setPreset(null); setRange([v, v > to ? v : to]) }} label="از تاریخ" /></div>
+          <div><span className="muted small">تا</span><JDateInput value={to} onChange={(v) => { setPreset(null); setRange([v < from ? v : from, v]) }} label="تا تاریخ" /></div>
+        </div>
+      </div>
       {showSales && <DashSales range={range} onOpen={onOpen} />}
       {showProd && <DashProduction range={range} onOpen={onOpen} />}
       {showStaff && <DashStaff range={range} onOpen={onOpen} />}

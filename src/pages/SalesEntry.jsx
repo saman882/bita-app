@@ -25,7 +25,13 @@ export default function SalesEntry({ date, setDate }) {
   const [cat] = useCatalog()
   const [customers] = useCustomers()
   const [customer, setCustomer] = useState(null)
+  const [nextStep, setNextStep] = useState(0)
   const [lines, setLines] = useState([emptyLine()])
+  // Choosing a customer moves straight on to picking the first product.
+  const pickCustomer = (v) => {
+    setCustomer(v)
+    if (v && !lines[0]?.product) setTimeout(() => setNextStep((n) => n + 1), 150)
+  }
   const [busy, setBusy] = useState(false)
   const [edit, setEdit] = useState(null)
   const [delId, setDelId] = useState(null)
@@ -95,12 +101,12 @@ export default function SalesEntry({ date, setDate }) {
           <Empty icon="users" title="هنوز مشتری‌ای تعریف نشده" text="از «اطلاعات پایه ← مشتریان» مشتری اضافه کنید." />
         ) : (
           <div className="form">
-            <Field label="مشتری"><SearchSelect label="جستجوی مشتری (نام یا کد)" items={customers.filter((c) => c.active || c.id === customer)} value={customer} onChange={setCustomer} placeholder="نام یا کد مشتری را جستجو کنید" /></Field>
+            <Field label="مشتری"><SearchSelect label="جستجوی مشتری (نام یا کد)" items={customers.filter((c) => c.active || c.id === customer)} value={customer} onChange={pickCustomer} placeholder="نام یا کد مشتری را جستجو کنید" /></Field>
             <div className="sale-lines">
               {lines.map((l, i) => (
                 <div key={l.key} className="sale-line">
                   <div className="sale-line-head"><b>محصول {fa(i + 1)}</b>{lines.length > 1 && <button className="icon-btn" onClick={() => setLines(lines.filter((x) => x.key !== l.key))} aria-label="حذف ردیف"><Icon name="x" size={16} /></button>}</div>
-                  <SearchSelect label="انتخاب محصول" items={products} value={l.product} group="type" placeholder="محصول را انتخاب کنید"
+                  <SearchSelect label="انتخاب محصول" items={products} value={l.product} group="type" placeholder="محصول را انتخاب کنید" openSignal={i === 0 ? nextStep : 0}
                     onChange={(v) => setLine(l.key, { product: v, price: l.price === '' || l.price === String(priceOf(l.product)) ? String(priceOf(v)) : l.price })} />
                   <div className="grid2">
                     <label className="field"><span className="field-label">تعداد</span><NumInput value={l.qty} onChange={(v) => setLine(l.key, { qty: v })} placeholder="۰" /></label>

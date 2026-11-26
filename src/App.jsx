@@ -8,6 +8,7 @@ import Account from './pages/Account'
 import Entry from './pages/Entry'
 import BaseInfo from './pages/BaseInfo'
 import Purge from './pages/Purge'
+import Backup from './pages/Backup'
 import { Users } from './pages/People'
 
 const Reports = lazy(() => import('./pages/Reports'))
@@ -20,6 +21,7 @@ const ALL_TABS = [
   { id: 'entry', label: 'ثبت روزانه', short: 'ثبت', icon: 'cal', perms: ['entry_production', 'entry_sales'] },
   { id: 'base', label: 'اطلاعات پایه', short: 'اطلاعات', icon: 'box' },
   { id: 'users', label: 'حساب‌های کاربری', short: 'حساب‌ها', icon: 'key', perms: ['users'] },
+  { id: 'backup', label: 'پشتیبان‌گیری', icon: 'download', perms: ['data_purge'], desktopOnly: true },
   { id: 'purge', label: 'پاک‌سازی داده‌ها', icon: 'trash', perms: ['data_purge'], desktopOnly: true },
   { id: 'account', label: 'حساب من', short: 'من', icon: 'user' },
 ]
@@ -146,8 +148,9 @@ function Shell({ profile, reloadProfile }) {
           {tab === 'entry' && <Entry />}
           {tab === 'base' && <BaseInfo workers={workers} reloadWorkers={loadWorkers} me={profile} />}
           {tab === 'users' && can(access, 'users') && <Users me={profile} onMeChanged={reloadProfile} />}
+          {tab === 'backup' && can(access, 'data_purge') && <Backup />}
           {tab === 'purge' && can(access, 'data_purge') && <Purge />}
-          {tab === 'account' && <Account profile={profile} onChanged={reloadProfile} onPurge={() => go('purge')} />}
+          {tab === 'account' && <Account profile={profile} onChanged={reloadProfile} onPurge={() => go('purge')} onBackup={() => go('backup')} />}
         </div>
       </main>
 

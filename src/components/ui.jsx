@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { fa, toEn, jParts, isoFromJ, jMonthLen, MONTHS, tehranIso, isoToDate, normalizeFa } from '../lib/fmt'
 
 /* ---------------- Icons (stroke, 24px grid) ---------------- */
@@ -78,8 +79,9 @@ export function Sheet({ open, onClose, title, children, footer }) {
     return () => window.removeEventListener('keydown', k)
   }, [open, onClose])
   if (!open) return null
-  return (
-    <div className="sheet-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
+  // Rendered at <body> so a sheet opened from inside a <label> (Field) is not re-triggered by the label's click.
+  return createPortal(
+    <div className="sheet-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose?.()} onClick={(e) => e.stopPropagation()}>
       <div className="sheet" role="dialog" aria-modal="true" aria-label={title}>
         <div className="sheet-grip" />
         <div className="sheet-head">
@@ -89,7 +91,8 @@ export function Sheet({ open, onClose, title, children, footer }) {
         <div className="sheet-body">{children}</div>
         {footer && <div className="sheet-foot">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -209,8 +212,9 @@ export function JCalendar({ value, onChange, marks, maxIso = tehranIso(), onMont
 }
 
 /* ---------------- Searchable picker (opens a sheet) ---------------- */
-export function SearchSelect({ label, items, value, onChange, placeholder = 'انتخاب کنید', allLabel, render, group }) {
+export function SearchSelect({ label, items, value, onChange, placeholder = 'انتخاب کنید', allLabel, render, group, openSignal }) {
   const [open, setOpen] = useState(false)
+  useEffect(() => { if (openSignal) { setQ(''); setOpen(true) } }, [openSignal])
   const [q, setQ] = useState('')
   const sel = items.find((i) => String(i.id) === String(value))
   const list = useMemo(() => {
@@ -219,7 +223,7 @@ export function SearchSelect({ label, items, value, onChange, placeholder = 'ا�
   }, [q, items])
   return (
     <>
-      <button type="button" className="input picker" onClick={() => { setQ(''); setOpen(true) }} aria-label={label}>
+      <button type="button" className="input picker" onClick={(e) => { e.preventDefault(); setQ(''); setOpen(true) }} aria-label={label}>
         <span className={sel || (allLabel && value == null) ? '' : 'muted'}>{sel ? sel.name : value == null && allLabel ? allLabel : placeholder}</span>
         <Icon name="search" size={16} />
       </button>

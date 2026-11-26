@@ -779,3 +779,6 @@ button.erow.op-person:hover { border-color: var(--brand); }
 .support-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .support-links .btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
 .share-bar { direction: ltr; }
+.backup-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+.backup-item { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 14px; }
+.backup-item .grow { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 220px; }
