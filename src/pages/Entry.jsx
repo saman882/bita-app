@@ -384,7 +384,7 @@ function WorkerDay({ worker, date, cat, showEff, onClose, onSaved }) {
               <div key={j.id} className="job" style={{ '--c': j.color }}>
                 <span className="job-bar" />
                 <div className="grow">
-                  <div className="job-top"><b>{j.stage_name}</b>{e != null && <span className={`badge badge-${effTone(e)}`}>{pct(e)}</span>}</div>
+                  <div className="job-top"><b>{j.stage_name}</b>{e != null && <span className={`badge badge-${effTone(e)}`}>{pct(e)}</span>}{showEff && j.std_seconds == null && <span className="badge" title="در بهره‌وری حساب نمی‌شود؛ در حضور مؤثر حساب می‌شود">بدون زمان استاندارد</span>}</div>
                   <small className="muted">{j.product_name}</small>
                   <div className="job-meta">
                     <span className="mono">{j.start_time ? `${fa(t5(j.start_time))} تا ${fa(t5(j.end_time))}` : 'بدون ساعت'}</span>

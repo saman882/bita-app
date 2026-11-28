@@ -232,7 +232,8 @@ function Standards({ d, reload }) {
 
   return (
     <div className="card">
-      <p className="muted small">زمان لازم برای <b>یک عدد</b>، به <b>ثانیه</b>. خانهٔ خالی یعنی آن عملیات برای آن نوع محصول تعریف نشده. تغییرات فقط روی ثبت‌های بعدی اثر دارد؛ گزارش‌های گذشته با همان زمانِ لحظهٔ ثبت محاسبه می‌شوند.</p>
+      <p className="muted small">زمان لازم برای <b>یک عدد</b>، به <b>ثانیه</b>.</p>
+      <div className="banner"><Icon name="clock" /><div><b>عملیات بدون زمان:</b> اگر عملیاتی زمان استاندارد ندارد (مثلاً بارگیری)، خانه‌اش را <b>خالی</b> بگذارید. ساعت آن عملیات در «حضور مؤثر» حساب می‌شود ولی در «بهره‌وری» حساب نمی‌شود. اگر زمانی را پاک کنید، ثبت‌های قبلی آن عملیات هم از بهره‌وری خارج می‌شوند؛ تغییر یک عدد فقط روی ثبت‌های بعدی اثر دارد.</div></div>
       <div className="table-wrap">
         <table className="table std-grid">
           <thead><tr><th>عملیات</th>{d.types.map((t) => <th key={t.id}>{t.name}</th>)}</tr></thead>
@@ -244,7 +245,7 @@ function Standards({ d, reload }) {
                   const k = `${s.id}|${t.id}`
                   return (
                     <td key={t.id}>
-                      <input className={`input std-input ${(vals[k] || '') !== (orig[k] || '') ? 'dirty' : ''}`} inputMode="decimal" dir="ltr" placeholder="—"
+                      <input className={`input std-input ${(vals[k] || '') !== (orig[k] || '') ? 'dirty' : ''}`} inputMode="decimal" dir="ltr" placeholder="بدون زمان"
                         value={fa(vals[k] || '')} onChange={(e) => setVals({ ...vals, [k]: toEn(e.target.value).replace(/[^\d.]/g, '') })} aria-label={`${s.name} — ${t.name}`} />
                     </td>
                   )
